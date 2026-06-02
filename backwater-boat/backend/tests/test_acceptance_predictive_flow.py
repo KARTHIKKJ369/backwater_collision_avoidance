@@ -14,7 +14,7 @@ class AcceptancePredictiveFlowTests(unittest.TestCase):
         boat_b = {"boat_id": "B02", "lat": 9.5910, "lon": 76.5221, "speed": 8.0, "heading": 270, "obstacle": 0}
 
         risk = compute_risk(boat_a, boat_b)
-        self.assertTrue(should_run_prediction(risk["distance_m"], risk["risk"]))
+        self.assertTrue(should_run_prediction(risk["distance_m"], risk["risk"], risk["ttc"]))
 
         predicted_a = [
             {"lat": 9.5910, "lon": 76.5213},

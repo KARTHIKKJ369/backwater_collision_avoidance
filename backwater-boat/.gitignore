@@ -6,4 +6,6 @@ venv/
 node_modules/
 dist/
 backend/data/
+data/
 ml/model.h5
+results/live.csv

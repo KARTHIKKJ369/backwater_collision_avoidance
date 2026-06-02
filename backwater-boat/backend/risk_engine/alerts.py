@@ -45,8 +45,16 @@ class AlertManager:
             return False
         return True
 
-    def save_alert(self, boat_id: str, timestamp: float, severity: str, message: str, key: str | None = None) -> int:
-        alert_id = db.insert_alert(boat_id, timestamp, severity, message)
+    def save_alert(
+        self,
+        boat_id: str,
+        timestamp: float,
+        severity: str,
+        message: str,
+        key: str | None = None,
+        scenario: str = "LIVE",
+    ) -> int:
+        alert_id = db.insert_alert(boat_id, timestamp, severity, message, scenario)
         state_key = key or boat_id
         self._states[state_key] = severity
         self._last_alert_at[state_key] = time.time()

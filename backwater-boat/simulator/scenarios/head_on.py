@@ -10,4 +10,4 @@ def make_states() -> list[dict[str, float | int | str]]:
 
 def update(states: list[object], tick: int) -> None:
     for state in states:
-        state.speed = max(4.0, state.speed - 0.01 * tick)
+        state.speed = 8.0

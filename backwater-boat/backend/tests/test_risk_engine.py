@@ -5,7 +5,9 @@ import unittest
 from backend.predict_controller import should_run_prediction
 from backend.risk_engine.alerts import AlertManager
 from backend.risk_engine.predictive_collision import predict_collision
+from backend.risk_engine.risk_engine import compute_risk
 from backend.risk_engine.ttc import compute_ttc
+from ml.inference.predict import trajectory_confidence
 
 
 class RiskEngineTests(unittest.TestCase):
@@ -37,9 +39,25 @@ class RiskEngineTests(unittest.TestCase):
         self.assertGreater(result["collision_probability"], 0)
 
     def test_prediction_trigger_gate(self) -> None:
-        self.assertTrue(should_run_prediction(distance_m=149, risk=0.1))
-        self.assertTrue(should_run_prediction(distance_m=200, risk=0.31))
-        self.assertFalse(should_run_prediction(distance_m=150, risk=0.3))
+        self.assertTrue(should_run_prediction(distance_m=79, risk=0.1, ttc=100))
+        self.assertTrue(should_run_prediction(distance_m=200, risk=0.1, ttc=9.9))
+        self.assertTrue(should_run_prediction(distance_m=200, risk=0.51, ttc=100))
+        self.assertFalse(should_run_prediction(distance_m=80, risk=0.5, ttc=10))
+
+    def test_confidence_varies_with_trajectory_variance(self) -> None:
+        stable = [{"lat": 9.591, "lon": 76.522}, {"lat": 9.59101, "lon": 76.52201}]
+        variable = [{"lat": 9.591, "lon": 76.522}, {"lat": 9.592, "lon": 76.524}]
+
+        self.assertGreater(trajectory_confidence(stable), trajectory_confidence(variable))
+
+    def test_head_on_risk_uses_closing_ttc(self) -> None:
+        boat_a = {"lat": 9.591, "lon": 76.5211, "speed": 8, "heading": 90}
+        boat_b = {"lat": 9.591, "lon": 76.5221, "speed": 8, "heading": 270}
+
+        result = compute_risk(boat_a, boat_b)
+
+        self.assertLess(result["ttc"], 10)
+        self.assertGreater(result["risk"], 0.5)
 
 
 if __name__ == "__main__":

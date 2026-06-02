@@ -1,0 +1,14 @@
+{
+  "scenario": "LIVE",
+  "precision": 0.0,
+  "recall": 0.0,
+  "f1": 0.0,
+  "false_alarm_rate": 0.0,
+  "avg_ttc": 0.0,
+  "avg_prediction_error": 0.0,
+  "alerts": 0,
+  "predictions": 0,
+  "collisions": 0,
+  "avg_risk": 0.0,
+  "latency": 0
+}

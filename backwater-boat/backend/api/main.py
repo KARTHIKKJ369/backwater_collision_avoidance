@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.database import db
+from backend.evaluation import evaluate, timeline as evaluation_timeline
 from backend.mqtt.mqtt_client import publish, store_message, subscribe
 from backend.predict_controller import manual_prediction, metrics as prediction_metrics
 
@@ -30,6 +31,7 @@ class TelemetryIn(BaseModel):
     speed: float
     heading: float
     obstacle: int = 0
+    scenario: str = "LIVE"
 
 
 class PredictIn(BaseModel):
@@ -80,6 +82,11 @@ def predictions(limit: int = Query(100, ge=1, le=500)) -> list[dict[str, Any]]:
     return db.fetch_all("prediction", limit)
 
 
+@app.get("/recommendations")
+def recommendations(limit: int = Query(100, ge=1, le=500)) -> list[dict[str, Any]]:
+    return db.fetch_all("recommendations", limit)
+
+
 @app.post("/predict")
 def predict(payload: PredictIn) -> dict[str, Any]:
     result = manual_prediction(payload.boat_id)
@@ -99,4 +106,18 @@ def metrics() -> dict[str, float | int]:
         "avg_risk": db.average_risk(),
         "prediction_skipped": prediction["prediction_skipped"],
         "prediction_executed": prediction["prediction_executed"],
+        "warnings": prediction["warnings"],
+        "recommendations": prediction["recommendations"],
+        "accepted_actions": prediction["accepted_actions"],
+        "avoided_collisions": prediction["avoided_collisions"],
     }
+
+
+@app.get("/evaluation")
+def evaluation(scenario: str = "LIVE") -> dict[str, float | int | str]:
+    return evaluate(scenario)
+
+
+@app.get("/timeline")
+def timeline(scenario: str = "LIVE") -> list[dict[str, float | int | str]]:
+    return evaluation_timeline(scenario)

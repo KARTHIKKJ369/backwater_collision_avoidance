@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, Clock, Map, Radio, Route, Table2 } from "lucide-react";
+import { Activity, AlertTriangle, Clock, Map, Radio, Route, Table2 } from "lucide-react";
 import { MapContainer, Marker, Polyline, Popup, TileLayer } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -19,29 +19,43 @@ const tabs = [
   { id: "map", label: "Live Map", icon: Map },
   { id: "collision", label: "Predictive Collision", icon: AlertTriangle },
   { id: "prediction", label: "Prediction", icon: Route },
+  { id: "evaluation", label: "Scenario Evaluation", icon: Activity },
   { id: "alerts", label: "Alerts", icon: AlertTriangle },
   { id: "telemetry", label: "Telemetry", icon: Table2 },
   { id: "history", label: "History", icon: Clock },
 ];
 
 function useApiData() {
-  const [state, setState] = useState({ boats: [], telemetry: [], latest: [], alerts: [], predictions: [], metrics: {} });
+  const [state, setState] = useState({
+    boats: [],
+    telemetry: [],
+    latest: [],
+    alerts: [],
+    predictions: [],
+    metrics: {},
+    evaluation: {},
+    timeline: [],
+    recommendations: [],
+  });
   const [error, setError] = useState("");
 
   useEffect(() => {
     let alive = true;
     async function load() {
       try {
-        const [boats, telemetry, latest, alerts, predictions, metrics] = await Promise.all([
+        const [boats, telemetry, latest, alerts, predictions, metrics, evaluation, timeline, recommendations] = await Promise.all([
           fetch(`${API_BASE}/boats`).then((r) => r.json()),
           fetch(`${API_BASE}/telemetry?limit=120`).then((r) => r.json()),
           fetch(`${API_BASE}/telemetry/latest`).then((r) => r.json()),
           fetch(`${API_BASE}/alerts?limit=50`).then((r) => r.json()),
           fetch(`${API_BASE}/predictions?limit=50`).then((r) => r.json()),
           fetch(`${API_BASE}/metrics`).then((r) => r.json()),
+          fetch(`${API_BASE}/evaluation`).then((r) => r.json()),
+          fetch(`${API_BASE}/timeline`).then((r) => r.json()),
+          fetch(`${API_BASE}/recommendations?limit=20`).then((r) => r.json()),
         ]);
         if (alive) {
-          setState({ boats, telemetry, latest, alerts, predictions, metrics });
+          setState({ boats, telemetry, latest, alerts, predictions, metrics, evaluation, timeline, recommendations });
           setError("");
         }
       } catch (exc) {
@@ -119,9 +133,11 @@ function Shell() {
             telemetry={data.telemetry}
             predictions={data.predictions}
             metrics={data.metrics}
+            recommendations={data.recommendations}
           />
         )}
         {active === "prediction" && <Prediction latest={data.latest} predictions={data.predictions} />}
+        {active === "evaluation" && <ScenarioEvaluation evaluation={data.evaluation} timeline={data.timeline} />}
         {active === "alerts" && <Alerts alerts={data.alerts} />}
         {active === "telemetry" && <Telemetry rows={data.telemetry} />}
         {active === "history" && <History telemetry={data.telemetry} alerts={data.alerts} />}
@@ -130,7 +146,46 @@ function Shell() {
   );
 }
 
-function PredictiveCollision({ center, latest, telemetry, predictions, metrics }) {
+function ScenarioEvaluation({ evaluation, timeline }) {
+  const cards = [
+    ["Scenario", evaluation.scenario || "LIVE"],
+    ["Alerts", evaluation.alerts || 0],
+    ["Predictions", evaluation.predictions || 0],
+    ["Collisions", evaluation.collisions || 0],
+    ["Precision", formatPercent(evaluation.precision)],
+    ["Latency", `${evaluation.latency || 0} ms`],
+  ];
+
+  return (
+    <div className="evaluation-page">
+      <section className="eval-cards">
+        {cards.map(([label, value]) => (
+          <div className="eval-card" key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </section>
+      <section className="panel">
+        <h3>Collision Timeline</h3>
+        <div className="timeline-chart">
+          {timeline.slice(-80).map((point, index) => (
+            <div className="timeline-row" key={`${point.t}-${index}`}>
+              <span>{formatValue(point.t)}</span>
+              <div className="timeline-track">
+                <i className={riskClass(point.risk)} style={{ width: `${Math.max(4, Math.min(100, Number(point.risk || 0) * 100))}%` }} />
+              </div>
+              <strong>{point.alert || "SAFE"}</strong>
+            </div>
+          ))}
+          {timeline.length === 0 && <p className="empty">No timeline samples yet.</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PredictiveCollision({ center, latest, telemetry, predictions, metrics, recommendations }) {
   const [boatA, boatB] = latest;
   const actualPaths = groupPath(telemetry, "lat", "lon");
   const predictedPaths = groupPath(predictions, "pred_lat", "pred_lon");
@@ -140,6 +195,10 @@ function PredictiveCollision({ center, latest, telemetry, predictions, metrics }
   const futureDistance = futureSeparation(predictedPaths[boatA?.boat_id], predictedPaths[boatB?.boat_id]);
   const alertState = stateForFutureDistance(futureDistance);
   const risk = boatA && boatB ? Math.max(Number(boatA.risk || 0), Number(boatB.risk || 0)) : 0;
+  const avgConfidence = averageConfidence(predictions);
+  const ttcState = ttcColorState(ttc);
+  const riskState = riskClass(risk);
+  const latestRecommendation = recommendations[0];
 
   return (
     <div className="collision-layout">
@@ -164,22 +223,28 @@ function PredictiveCollision({ center, latest, telemetry, predictions, metrics }
         <Metric label="Boat B" value={boatB?.boat_id || "-"} />
         <Metric label="Current Position" value={boatA ? `${boatA.lat}, ${boatA.lon}` : "-"} />
         <Metric label="Predicted Position" value={predictedPaths[boatA?.boat_id]?.[0]?.join(", ") || "-"} />
-        <div className="risk-meter">
+        <Metric label="Recommendation" value={latestRecommendation?.action || "MAINTAIN"} tone={recommendationTone(latestRecommendation?.action)} />
+        <Metric label="Risk Gauge" value={`${(risk * 100).toFixed(0)}%`} tone={riskState} />
+        <div className={`risk-meter ${riskState}`}>
           <span style={{ width: `${Math.min(100, risk * 100)}%` }}></span>
         </div>
-        <Metric label="Time To Collision" value={ttc ? `${ttc.toFixed(1)} s` : "-"} />
+        <Metric label="Collision Counter" value={metrics.collisions_predicted || 0} tone={metrics.collisions_predicted ? "danger" : "safe"} />
+        <Metric label="Prediction Confidence" value={avgConfidence ? `${(avgConfidence * 100).toFixed(0)}%` : "-"} tone={confidenceState(avgConfidence)} />
+        <Metric label="Current TTC" value={ttc ? `${ttc.toFixed(1)} s` : "-"} tone={ttcState} />
         <Metric label="Future Distance" value={futureDistance ? `${futureDistance.toFixed(1)} m` : "-"} />
-        <Metric label="Alert State" value={alertState} />
+        <Metric label="Alert State" value={alertState} tone={alertState.toLowerCase()} />
         <Metric label="Predictions" value={`${metrics.prediction_executed || 0} run / ${metrics.prediction_skipped || 0} skipped`} />
+        <Metric label="Accepted Actions" value={metrics.accepted_actions || 0} tone={metrics.accepted_actions ? "safe" : ""} />
+        <Metric label="Avoided Collisions" value={metrics.avoided_collisions || 0} tone={metrics.avoided_collisions ? "safe" : ""} />
         <Metric label="Alerts Total" value={metrics.alerts_total || 0} />
       </aside>
     </div>
   );
 }
 
-function Metric({ label, value }) {
+function Metric({ label, value, tone = "" }) {
   return (
-    <div className="metric">
+    <div className={`metric ${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
@@ -308,6 +373,10 @@ function formatValue(value) {
   return value ?? "";
 }
 
+function formatPercent(value) {
+  return value == null ? "0%" : `${(Number(value) * 100).toFixed(1)}%`;
+}
+
 function groupPath(rows, latKey, lonKey) {
   return rows.reduce((acc, row) => {
     if (row[latKey] == null || row[lonKey] == null) return acc;
@@ -342,6 +411,29 @@ function stateForFutureDistance(distance) {
   if (!distance || distance > 100) return "SAFE";
   if (distance >= 50) return "WARNING";
   return "DANGER";
+}
+
+function averageConfidence(predictions) {
+  if (!predictions.length) return 0;
+  return predictions.reduce((sum, point) => sum + Number(point.confidence || 0), 0) / predictions.length;
+}
+
+function confidenceState(confidence) {
+  if (confidence >= 0.75) return "safe";
+  if (confidence >= 0.45) return "warning";
+  return "danger";
+}
+
+function ttcColorState(ttc) {
+  if (!ttc || ttc > 20) return "safe";
+  if (ttc > 10) return "warning";
+  return "danger";
+}
+
+function recommendationTone(action = "") {
+  if (action.startsWith("HARD") || action === "STOP") return "danger";
+  if (action === "SLOW_DOWN" || action.startsWith("TURN")) return "warning";
+  return "safe";
 }
 
 createRoot(document.getElementById("root")).render(<Shell />);

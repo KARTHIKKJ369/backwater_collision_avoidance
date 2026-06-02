@@ -173,7 +173,8 @@ nav button:hover,
 
 .panel-grid,
 .alerts,
-.collision-layout {
+.collision-layout,
+.evaluation-page {
   padding: 20px;
 }
 
@@ -189,6 +190,71 @@ nav button:hover,
   grid-template-columns: 1fr 320px;
   gap: 16px;
   min-height: 0;
+}
+
+.evaluation-page {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.eval-cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.eval-card {
+  background: #ffffff;
+  border: 1px solid #dbe4e8;
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.eval-card span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.eval-card strong {
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.timeline-chart {
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 86px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.timeline-track {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.timeline-track i {
+  display: block;
+  height: 100%;
+  background: #16a34a;
+}
+
+.timeline-track i.warning {
+  background: #f59e0b;
+}
+
+.timeline-track i.danger {
+  background: #e11d48;
 }
 
 .collision-map,
@@ -224,6 +290,22 @@ nav button:hover,
   overflow-wrap: anywhere;
 }
 
+.metric.safe strong {
+  color: #166534;
+}
+
+.metric.warning strong {
+  color: #92400e;
+}
+
+.metric.early_warning strong {
+  color: #92400e;
+}
+
+.metric.danger strong {
+  color: #991b1b;
+}
+
 .risk-meter {
   height: 12px;
   border-radius: 999px;
@@ -234,6 +316,14 @@ nav button:hover,
 .risk-meter span {
   display: block;
   height: 100%;
+  background: #16a34a;
+}
+
+.risk-meter.warning span {
+  background: #f59e0b;
+}
+
+.risk-meter.danger span {
   background: #e11d48;
 }
 
@@ -334,7 +424,7 @@ th {
   }
 
   nav {
-    grid-template-columns: repeat(6, minmax(44px, 1fr));
+    grid-template-columns: repeat(7, minmax(44px, 1fr));
   }
 
   nav button {
@@ -362,5 +452,9 @@ th {
   .collision-layout {
     grid-template-columns: 1fr;
     padding: 12px;
+  }
+
+  .eval-cards {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
 }

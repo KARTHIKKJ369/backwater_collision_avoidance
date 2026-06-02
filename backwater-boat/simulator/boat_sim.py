@@ -97,6 +97,7 @@ def main() -> None:
     scenario = "head_on" if args.scenario == "HEAD_ON" else args.scenario
     boats = make_boats(scenario)
     tick = 0
+    scenario_label = args.scenario.upper()
     print(f"Publishing {args.scenario} scenario to {MQTT_HOST}:{MQTT_PORT}", flush=True)
 
     while True:
@@ -104,6 +105,7 @@ def main() -> None:
         for boat in boats:
             boat.step()
             payload = boat.payload(tick)
+            payload["scenario"] = scenario_label
             topic = f"boats/{boat.boat_id}/sensor"
             client.publish(topic, json.dumps(payload), qos=0)
             print(json.dumps(payload), flush=True)

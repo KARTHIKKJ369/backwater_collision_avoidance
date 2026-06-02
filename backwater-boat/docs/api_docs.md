@@ -63,6 +63,23 @@ Returns the latest position for each boat.
 
 Returns stored future positions.
 
+### GET /recommendations
+
+Returns cooperative avoidance recommendations.
+
+Response:
+
+```json
+[
+  {
+    "boat_id": "B01",
+    "action": "TURN_RIGHT",
+    "accepted": 0,
+    "alert_state": "WARNING"
+  }
+]
+```
+
 ### GET /metrics
 
 Response:
@@ -75,8 +92,56 @@ Response:
   "avg_prediction_latency_ms": 0,
   "avg_risk": 0,
   "prediction_skipped": 0,
-  "prediction_executed": 0
+  "prediction_executed": 0,
+  "warnings": 0,
+  "recommendations": 0,
+  "accepted_actions": 0,
+  "avoided_collisions": 0
 }
+```
+
+### GET /evaluation
+
+Computes evaluation metrics from alerts, predictions, and telemetry, then writes `results/evaluation.csv`, `results/{scenario}.csv`, and `results/summary.json`.
+
+Query parameters:
+
+- `scenario`: optional, defaults to `LIVE`
+
+Response:
+
+```json
+{
+  "precision": 0,
+  "recall": 0,
+  "f1": 0,
+  "false_alarm_rate": 0,
+  "avg_ttc": 0
+}
+```
+
+### GET /timeline
+
+Returns scenario timeline samples for charting and export.
+
+Query parameters:
+
+- `scenario`: optional, defaults to `LIVE`
+
+Response:
+
+```json
+[
+  {
+    "t": 0,
+    "distance": 100,
+    "future_distance": 45,
+    "risk": 0.72,
+    "ttc": 6.2,
+    "prediction": 1,
+    "alert": "DANGER"
+  }
+]
 ```
 
 ### POST /telemetry

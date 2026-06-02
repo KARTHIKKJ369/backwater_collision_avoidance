@@ -121,10 +121,40 @@ Telemetry → Trigger Gate → LSTM/Dead-Reckoning Prediction → Future Collisi
 
 Prediction only runs when the current distance is under 150 meters or risk is above 0.3. Alerts are saved only when the pair state changes between `SAFE`, `WARNING`, and `DANGER`, with a 10 second cooldown.
 
+## Cooperative Avoidance
+
+The backend now publishes maneuver recommendations on `boats/{id}/recommendation` and listens for acknowledgements on `boats/{id}/ack`.
+
+Recommendation payload:
+
+```json
+{
+  "action": "TURN_RIGHT",
+  "accepted": true
+}
+```
+
 ## Tests
 
 ```bash
 PYTHONPATH=. python -m unittest discover backend/tests
+```
+
+## Evaluation
+
+The backend exposes evaluation metrics and writes `results/evaluation.csv` and `results/summary.json`:
+The backend exposes evaluation metrics and writes `results/evaluation.csv`, `results/{scenario}.csv`, and `results/summary.json`:
+
+```bash
+curl http://localhost:8000/evaluation
+curl http://localhost:8000/timeline?scenario=HEAD_ON
+```
+
+Run all automated scenarios after the stack is up:
+
+```bash
+cd simulator
+API_BASE=http://localhost:8000 MQTT_HOST=localhost python run_scenarios.py
 ```
 
 ## Team Split

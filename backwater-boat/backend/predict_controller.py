@@ -11,14 +11,18 @@ from ml.inference.predict import predict_future_positions
 prediction_skipped = 0
 prediction_executed = 0
 collisions_predicted = 0
+warnings = 0
+recommendations = 0
+accepted_actions = 0
+avoided_collisions = 0
 _prediction_latencies_ms: list[float] = []
 
 
-def should_run_prediction(distance_m: float, risk: float) -> bool:
-    return distance_m < 150 or risk > 0.3
+def should_run_prediction(distance_m: float, risk: float, ttc: float = 999_999.0) -> bool:
+    return distance_m < 80 or ttc < 10 or risk > 0.5
 
 
-def run_prediction(boat_id: str) -> dict[str, Any]:
+def run_prediction(boat_id: str, scenario: str = "LIVE") -> dict[str, Any]:
     global prediction_executed
     started = time.perf_counter()
     history = db.telemetry_for_boat(boat_id, 10)
@@ -26,7 +30,7 @@ def run_prediction(boat_id: str) -> dict[str, Any]:
     timestamp = time.time()
 
     for point in positions:
-        db.insert_prediction(boat_id, timestamp, point["lat"], point["lon"], point["confidence"])
+        db.insert_prediction(boat_id, timestamp, point["lat"], point["lon"], point["confidence"], scenario)
 
     latency_ms = (time.perf_counter() - started) * 1000
     _prediction_latencies_ms.append(latency_ms)
@@ -40,16 +44,29 @@ def skip_prediction(boat_id: str, reason: str) -> dict[str, Any]:
     return {"boat_id": boat_id, "executed": False, "positions": [], "reason": reason}
 
 
-def run_prediction_if_needed(boat_id: str, distance_m: float, risk: float) -> dict[str, Any]:
-    if should_run_prediction(distance_m, risk):
-        return run_prediction(boat_id)
-    return skip_prediction(boat_id, "distance>=150 and risk<=0.3")
+def run_prediction_if_needed(
+    boat_id: str,
+    distance_m: float,
+    risk: float,
+    ttc: float = 999_999.0,
+    scenario: str = "LIVE",
+) -> dict[str, Any]:
+    if should_run_prediction(distance_m, risk, ttc):
+        return run_prediction(boat_id, scenario)
+    return skip_prediction(boat_id, "distance>=80, ttc>=10, and risk<=0.5")
 
 
-def evaluate_pair(boat_a: str, boat_b: str, distance_m: float, risk: float) -> dict[str, Any]:
+def evaluate_pair(
+    boat_a: str,
+    boat_b: str,
+    distance_m: float,
+    risk: float,
+    ttc: float = 999_999.0,
+    scenario: str = "LIVE",
+) -> dict[str, Any]:
     global collisions_predicted
-    prediction_a = run_prediction_if_needed(boat_a, distance_m, risk)
-    prediction_b = run_prediction_if_needed(boat_b, distance_m, risk)
+    prediction_a = run_prediction_if_needed(boat_a, distance_m, risk, ttc, scenario)
+    prediction_b = run_prediction_if_needed(boat_b, distance_m, risk, ttc, scenario)
 
     if not prediction_a["executed"] or not prediction_b["executed"]:
         return {
@@ -79,6 +96,7 @@ def manual_prediction(boat_id: str) -> dict[str, Any]:
 
     trigger_distance = float("inf")
     trigger_risk = float(current.get("risk", 0.0))
+    trigger_ttc = 999_999.0
     for other in latest:
         if other["boat_id"] == boat_id:
             continue
@@ -87,10 +105,12 @@ def manual_prediction(boat_id: str) -> dict[str, Any]:
         result = compute_risk(current, other)
         trigger_distance = min(trigger_distance, result["distance_m"])
         trigger_risk = max(trigger_risk, result["risk"])
+        trigger_ttc = min(trigger_ttc, result["ttc"])
 
     if trigger_distance == float("inf"):
         trigger_distance = 999_999.0
-    return run_prediction_if_needed(boat_id, trigger_distance, trigger_risk)
+    scenario = current.get("scenario", "LIVE")
+    return run_prediction_if_needed(boat_id, trigger_distance, trigger_risk, trigger_ttc, scenario)
 
 
 def metrics() -> dict[str, float | int]:
@@ -99,4 +119,25 @@ def metrics() -> dict[str, float | int]:
         "prediction_executed": prediction_executed,
         "collisions_predicted": collisions_predicted,
         "avg_prediction_latency_ms": round(mean(_prediction_latencies_ms), 2) if _prediction_latencies_ms else 0,
+        "warnings": warnings,
+        "recommendations": recommendations,
+        "accepted_actions": accepted_actions,
+        "avoided_collisions": avoided_collisions,
     }
+
+
+def track_warning() -> None:
+    global warnings
+    warnings += 1
+
+
+def track_recommendation() -> None:
+    global recommendations
+    recommendations += 1
+
+
+def track_ack(accepted: bool) -> None:
+    global accepted_actions, avoided_collisions
+    if accepted:
+        accepted_actions += 1
+        avoided_collisions += 1

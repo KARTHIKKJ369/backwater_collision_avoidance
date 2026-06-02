@@ -8,9 +8,11 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
+from backend.avoidance.recommendation import recommend_action
 from backend.database import db
-from backend.predict_controller import evaluate_pair
+from backend.predict_controller import evaluate_pair, track_ack, track_recommendation, track_warning
 from backend.risk_engine.alerts import alert_manager
+from backend.risk_engine.early_warning import classify_future_distance
 from backend.risk_engine.risk_engine import compute_risk
 from backend.risk_engine.ttc import compute_ttc
 
@@ -20,6 +22,8 @@ TOPIC_SENSOR = "boats/+/sensor"
 TOPIC_PREDICT = "boats/{id}/predict"
 TOPIC_ALERT = "boats/{id}/alert"
 TOPIC_STATUS = "boats/{id}/status"
+TOPIC_RECOMMENDATION = "boats/{id}/recommendation"
+TOPIC_ACK = "boats/+/ack"
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="backend-api")
 _latest: dict[str, dict[str, Any]] = {}
@@ -41,6 +45,8 @@ def publish(topic: str, payload: dict[str, Any] | list[Any]) -> None:
 def store_message(payload: dict[str, Any]) -> dict[str, Any]:
     boat_id = str(payload["boat_id"])
     payload["boat_id"] = boat_id
+    scenario = str(payload.get("scenario", "LIVE"))
+    payload["scenario"] = scenario
     risk = 0.0
     risk_result: dict[str, Any] | None = None
     alert_id: int | None = None
@@ -62,19 +68,57 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
 
     if risk_result and other_boat_id:
         ttc = compute_ttc(risk_result["distance_m"], risk_result["relative_speed"])
-        prediction_result = evaluate_pair(boat_id, other_boat_id, risk_result["distance_m"], risk_result["risk"])
+        prediction_result = evaluate_pair(
+            boat_id,
+            other_boat_id,
+            risk_result["distance_m"],
+            risk_result["risk"],
+            ttc["ttc"],
+            scenario,
+        )
         collision = prediction_result.get("collision") if prediction_result else None
 
         if collision:
-            state = alert_manager.transition_state(future_distance=collision["future_distance"])
+            state = classify_future_distance(collision["future_distance"])
+            if state != "SAFE":
+                track_warning()
+
+            action = recommend_action(
+                risk_result["heading_difference"],
+                prediction_result.get("prediction_a", {}).get("positions", []),
+                ttc["ttc"],
+            )
+            if action != "MAINTAIN":
+                track_recommendation()
+                db.insert_recommendation(boat_id, payload["timestamp"], action, scenario, state)
+                publish(
+                    TOPIC_RECOMMENDATION.format(id=boat_id),
+                    {
+                        "boat_id": boat_id,
+                        "other_boat_id": other_boat_id,
+                        "action": action,
+                        "accepted": False,
+                        "alert_state": state,
+                        "ttc": ttc["ttc"],
+                        "future_distance": collision["future_distance"],
+                    },
+                )
+
             pair_key = ":".join(sorted([boat_id, other_boat_id]))
             if alert_manager.should_alert(pair_key, state):
                 message = (
-                    f"{state} predictive collision risk with {other_boat_id}: "
+                    f"{state} cooperative collision risk with {other_boat_id}: "
                     f"{collision['future_distance']} m future separation, "
-                    f"TTC {collision['time_to_collision']} s"
+                    f"TTC {ttc['ttc']} s, action {action}"
                 )
-                alert_id = alert_manager.save_alert(boat_id, payload["timestamp"], state, message, key=pair_key)
+                alert_id = alert_manager.save_alert(
+                    boat_id,
+                    payload["timestamp"],
+                    state,
+                    message,
+                    key=pair_key,
+                    scenario=scenario,
+                )
                 publish(
                     TOPIC_ALERT.format(id=boat_id),
                     {
@@ -83,6 +127,8 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
                         **risk_result,
                         **ttc,
                         **collision,
+                        "action": action,
+                        "alert_state": state,
                         "message": message,
                     },
                 )
@@ -99,6 +145,7 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _on_connect(mqtt_client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
     mqtt_client.subscribe(TOPIC_SENSOR)
+    mqtt_client.subscribe(TOPIC_ACK)
 
 
 def _on_message(mqtt_client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
@@ -107,7 +154,14 @@ def _on_message(mqtt_client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessa
         topic_boat_id = _boat_id_from_topic(message.topic)
         if topic_boat_id:
             payload.setdefault("boat_id", topic_boat_id)
-        store_message(payload)
+        if message.topic.endswith("/ack"):
+            accepted = bool(payload.get("accepted", False))
+            action = str(payload.get("action", ""))
+            if accepted and action:
+                db.mark_recommendation_accepted(payload["boat_id"], action)
+            track_ack(accepted)
+        else:
+            store_message(payload)
     except Exception as exc:
         print(f"MQTT message handling failed on {message.topic}: {exc}", flush=True)
 
