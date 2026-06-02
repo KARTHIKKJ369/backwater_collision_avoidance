@@ -18,8 +18,8 @@ avoided_collisions = 0
 _prediction_latencies_ms: list[float] = []
 
 
-def should_run_prediction(distance_m: float, risk: float, ttc: float = 999_999.0) -> bool:
-    return distance_m < 80 or ttc < 10 or risk > 0.5
+def should_run_prediction(distance_m: float, risk: float, ttc: float | None = None) -> bool:
+    return distance_m < 80 or (ttc is not None and ttc < 10) or risk > 0.5
 
 
 def run_prediction(boat_id: str, scenario: str = "LIVE") -> dict[str, Any]:
@@ -48,7 +48,7 @@ def run_prediction_if_needed(
     boat_id: str,
     distance_m: float,
     risk: float,
-    ttc: float = 999_999.0,
+    ttc: float | None = None,
     scenario: str = "LIVE",
 ) -> dict[str, Any]:
     if should_run_prediction(distance_m, risk, ttc):
@@ -61,7 +61,7 @@ def evaluate_pair(
     boat_b: str,
     distance_m: float,
     risk: float,
-    ttc: float = 999_999.0,
+    ttc: float | None = None,
     scenario: str = "LIVE",
 ) -> dict[str, Any]:
     global collisions_predicted
@@ -96,7 +96,7 @@ def manual_prediction(boat_id: str) -> dict[str, Any]:
 
     trigger_distance = float("inf")
     trigger_risk = float(current.get("risk", 0.0))
-    trigger_ttc = 999_999.0
+    trigger_ttc: float | None = None
     for other in latest:
         if other["boat_id"] == boat_id:
             continue
@@ -105,7 +105,8 @@ def manual_prediction(boat_id: str) -> dict[str, Any]:
         result = compute_risk(current, other)
         trigger_distance = min(trigger_distance, result["distance_m"])
         trigger_risk = max(trigger_risk, result["risk"])
-        trigger_ttc = min(trigger_ttc, result["ttc"])
+        if result["ttc"] is not None:
+            trigger_ttc = result["ttc"] if trigger_ttc is None else min(trigger_ttc, result["ttc"])
 
     if trigger_distance == float("inf"):
         trigger_distance = 999_999.0

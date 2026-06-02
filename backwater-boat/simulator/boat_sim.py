@@ -5,6 +5,7 @@ import importlib
 import json
 import math
 import os
+import threading
 import time
 from dataclasses import dataclass
 
@@ -12,6 +13,8 @@ import paho.mqtt.client as mqtt
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+
+TOPIC_RECOMMENDATION = "boats/+/recommendation"
 
 
 @dataclass
@@ -23,12 +26,100 @@ class BoatState:
     heading: float
     obstacle: int = 0
 
+    base_speed: float | None = None
+    base_heading: float | None = None
+
+    active_action: str | None = None
+    action_until: int = 0
+
+    def __post_init__(self):
+        self.base_speed = self.speed
+        self.base_heading = self.heading
+
     def step(self) -> None:
         rad = math.radians(self.heading)
-        self.lat += (self.speed * math.cos(rad)) / 111_320
-        self.lon += (self.speed * math.sin(rad)) / (111_320 * math.cos(math.radians(self.lat)))
 
-    def payload(self, timestamp: int) -> dict[str, float | int | str]:
+        self.lat += (
+            self.speed * math.cos(rad)
+        ) / 111_320
+
+        self.lon += (
+            self.speed * math.sin(rad)
+        ) / (
+            111_320
+            * math.cos(
+                math.radians(self.lat)
+            )
+        )
+
+    def recover(self, tick: int) -> None:
+
+        if (
+            self.active_action
+            and tick >= self.action_until
+        ):
+
+            print(
+                f"[SIM] restoring {self.boat_id}",
+                flush=True,
+            )
+
+            self.speed = self.base_speed
+            self.heading = self.base_heading
+
+            self.active_action = None
+
+    def apply_recommendation(
+        self,
+        action: str,
+        tick: int,
+    ) -> bool:
+
+        if (
+            self.active_action == action
+            and tick < self.action_until
+        ):
+            return False
+
+        self.active_action = action
+
+        self.action_until = tick + 5
+
+        print(
+            f"[SIM] applying {self.boat_id}: {action}",
+            flush=True,
+        )
+
+        if action == "TURN_RIGHT":
+
+            self.heading += 15
+
+        elif action == "TURN_LEFT":
+
+            self.heading -= 15
+
+        elif action == "HARD_RIGHT":
+
+            self.heading += 30
+
+        elif action == "SLOW_DOWN":
+
+            self.speed *= 0.8
+
+        print(
+            f"[SIM] "
+            f"speed={self.speed:.2f} "
+            f"heading={self.heading:.2f}",
+            flush=True,
+        )
+
+        return True
+
+    def payload(
+        self,
+        timestamp,
+    ):
+
         return {
             "boat_id": self.boat_id,
             "timestamp": timestamp,
@@ -40,77 +131,264 @@ class BoatState:
         }
 
 
-def make_boats(scenario: str) -> list[BoatState]:
-    module_name = scenario.lower()
-    if module_name == "head_on":
-        module_name = "head_on"
-    if module_name in {"head_on", "crossing", "blind_turn", "sudden_stop"}:
-        module = importlib.import_module(f"scenarios.{module_name}")
-        return [BoatState(**state) for state in module.make_states()]
+def make_boats(scenario):
 
-    if scenario == "straight":
-        return [
-            BoatState("B01", 9.5910, 76.5220, 4.2, 65),
-            BoatState("B02", 9.5898, 76.5208, 3.8, 65),
-        ]
-    if scenario == "collision":
-        return [
-            BoatState("B01", 9.5910, 76.5211, 5.0, 90),
-            BoatState("B02", 9.5910, 76.5240, 5.0, 270),
-        ]
-    raise ValueError(f"Unknown scenario: {scenario}")
+    module = importlib.import_module(
+        f"scenarios.{scenario.lower()}"
+    )
+
+    return [
+        BoatState(**x)
+        for x in module.make_states()
+    ]
 
 
-def update_scenario(boats: list[BoatState], scenario: str, tick: int) -> None:
-    module_name = scenario.lower()
-    if module_name in {"head_on", "crossing", "blind_turn", "sudden_stop"}:
-        module = importlib.import_module(f"scenarios.{module_name}")
-        module.update(boats, tick)
-    elif scenario == "collision":
-        for boat in boats:
-            boat.speed = max(2.8, boat.speed - 0.005 * tick)
+def update_scenario(
+    boats,
+    scenario,
+    tick,
+):
+
+    module = importlib.import_module(
+        f"scenarios.{scenario.lower()}"
+    )
+
+    active = []
+
+    for boat in boats:
+
+        if boat.active_action:
+            continue
+
+        active.append(boat)
+
+    module.update(
+        active,
+        tick,
+    )
 
 
-def connect_client() -> mqtt.Client:
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="boat-simulator")
-    for attempt in range(20):
-        try:
-            client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-            client.loop_start()
-            return client
-        except OSError:
-            time.sleep(min(5, attempt + 1))
-    raise RuntimeError(f"Unable to connect to MQTT broker at {MQTT_HOST}:{MQTT_PORT}")
+def connect_client():
+
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id="boat-simulator",
+    )
+
+    client.connect(
+        MQTT_HOST,
+        MQTT_PORT,
+        keepalive=60,
+    )
+
+    client.loop_start()
+
+    return client
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Backwater boat MQTT simulator")
+def topic_boat(topic):
+
+    parts = topic.split("/")
+
+    if len(parts) >= 3:
+
+        return parts[1]
+
+    return None
+
+
+def main():
+
+    parser = argparse.ArgumentParser()
+
     parser.add_argument(
         "--scenario",
-        choices=["straight", "crossing", "blind_turn", "collision", "HEAD_ON", "head_on", "sudden_stop"],
-        default="crossing",
+        default="HEAD_ON",
     )
-    parser.add_argument("--interval", type=float, default=1.0)
+
+    parser.add_argument(
+        "--interval",
+        default=1.0,
+        type=float,
+    )
+
     args = parser.parse_args()
 
+    scenario = args.scenario.lower()
+
+    boats = make_boats(
+        scenario
+    )
+
+    boats_by_id = {
+        b.boat_id: b
+        for b in boats
+    }
+
+    pending = {}
+
+    lock = threading.Lock()
+
     client = connect_client()
-    scenario = "head_on" if args.scenario == "HEAD_ON" else args.scenario
-    boats = make_boats(scenario)
+
+    def on_connect(
+        c,
+        u,
+        f,
+        rc,
+        p,
+    ):
+
+        c.subscribe(
+            TOPIC_RECOMMENDATION
+        )
+
+    def on_message(
+        c,
+        u,
+        msg,
+    ):
+
+        try:
+
+            payload = json.loads(
+                msg.payload.decode()
+            )
+
+        except Exception:
+
+            return
+
+        action = (
+            str(
+                payload.get(
+                    "action",
+                    "",
+                )
+            )
+            .strip()
+            .upper()
+        )
+
+        if (
+            not action
+            or action == "MAINTAIN"
+        ):
+            return
+
+        boat = (
+            payload.get(
+                "boat_id"
+            )
+            or topic_boat(
+                msg.topic
+            )
+        )
+
+        if not boat:
+            return
+
+        print(
+            f"[SIM] received {boat} -> {action}",
+            flush=True,
+        )
+
+        with lock:
+
+            pending[
+                boat
+            ] = action
+
+        client.publish(
+            f"boats/{boat}/ack",
+            json.dumps(
+                {
+                    "boat_id": boat,
+                    "action": action,
+                    "accepted": True,
+                }
+            ),
+        )
+
+    client.on_connect = on_connect
+
+    client.on_message = on_message
+
+    client.subscribe(
+        TOPIC_RECOMMENDATION
+    )
+
     tick = 0
-    scenario_label = args.scenario.upper()
-    print(f"Publishing {args.scenario} scenario to {MQTT_HOST}:{MQTT_PORT}", flush=True)
+
+    print(
+        f"Publishing {args.scenario}",
+        flush=True,
+    )
 
     while True:
-        update_scenario(boats, scenario, tick)
+
         for boat in boats:
+
+            boat.recover(
+                tick
+            )
+
+        update_scenario(
+            boats,
+            scenario,
+            tick,
+        )
+
+        with lock:
+
+            for boat in boats:
+
+                action = pending.pop(
+                    boat.boat_id,
+                    None,
+                )
+
+                if action:
+
+                    boat.apply_recommendation(
+                        action,
+                        tick,
+                    )
+
+        for boat in boats:
+
             boat.step()
-            payload = boat.payload(tick)
-            payload["scenario"] = scenario_label
-            topic = f"boats/{boat.boat_id}/sensor"
-            client.publish(topic, json.dumps(payload), qos=0)
-            print(json.dumps(payload), flush=True)
+
+            payload = boat.payload(
+                tick
+            )
+
+            payload[
+                "scenario"
+            ] = (
+                args.scenario
+                .upper()
+            )
+
+            client.publish(
+                f"boats/{boat.boat_id}/sensor",
+                json.dumps(
+                    payload
+                ),
+            )
+
+            print(
+                json.dumps(
+                    payload
+                ),
+                flush=True,
+            )
+
         tick += 1
-        time.sleep(args.interval)
+
+        time.sleep(
+            args.interval
+        )
 
 
 if __name__ == "__main__":

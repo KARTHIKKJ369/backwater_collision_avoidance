@@ -119,5 +119,5 @@ def evaluation(scenario: str = "LIVE") -> dict[str, float | int | str]:
 
 
 @app.get("/timeline")
-def timeline(scenario: str = "LIVE") -> list[dict[str, float | int | str]]:
+def timeline(scenario: str = "LIVE") -> list[dict[str, float | int | str | None]]:
     return evaluation_timeline(scenario)

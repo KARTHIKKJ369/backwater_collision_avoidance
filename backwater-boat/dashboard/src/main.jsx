@@ -191,7 +191,7 @@ function PredictiveCollision({ center, latest, telemetry, predictions, metrics, 
   const predictedPaths = groupPath(predictions, "pred_lat", "pred_lon");
   const distance = boatA && boatB ? haversine(boatA.lat, boatA.lon, boatB.lat, boatB.lon) : 0;
   const relativeSpeed = boatA && boatB ? Math.max(0.1, Math.abs(boatA.speed - boatB.speed)) : 0.1;
-  const ttc = distance ? distance / relativeSpeed : 0;
+  const ttc = distance ? distance / relativeSpeed : null;
   const futureDistance = futureSeparation(predictedPaths[boatA?.boat_id], predictedPaths[boatB?.boat_id]);
   const alertState = stateForFutureDistance(futureDistance);
   const risk = boatA && boatB ? Math.max(Number(boatA.risk || 0), Number(boatB.risk || 0)) : 0;
@@ -230,7 +230,7 @@ function PredictiveCollision({ center, latest, telemetry, predictions, metrics, 
         </div>
         <Metric label="Collision Counter" value={metrics.collisions_predicted || 0} tone={metrics.collisions_predicted ? "danger" : "safe"} />
         <Metric label="Prediction Confidence" value={avgConfidence ? `${(avgConfidence * 100).toFixed(0)}%` : "-"} tone={confidenceState(avgConfidence)} />
-        <Metric label="Current TTC" value={ttc ? `${ttc.toFixed(1)} s` : "-"} tone={ttcState} />
+        <Metric label="Current TTC" value={ttc === null ? "N/A" : `${ttc.toFixed(1)} s`} tone={ttcState} />
         <Metric label="Future Distance" value={futureDistance ? `${futureDistance.toFixed(1)} m` : "-"} />
         <Metric label="Alert State" value={alertState} tone={alertState.toLowerCase()} />
         <Metric label="Predictions" value={`${metrics.prediction_executed || 0} run / ${metrics.prediction_skipped || 0} skipped`} />

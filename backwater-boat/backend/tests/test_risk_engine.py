@@ -24,9 +24,20 @@ class RiskEngineTests(unittest.TestCase):
         self.assertTrue(manager.should_alert("B01:B02", "DANGER", now=22))
 
     def test_ttc_thresholds(self) -> None:
-        self.assertEqual(compute_ttc(700, 10)["state"], "SAFE")
-        self.assertEqual(compute_ttc(400, 10)["state"], "WARNING")
-        self.assertEqual(compute_ttc(100, 10)["state"], "DANGER")
+        result_safe = compute_ttc(700, 10)
+        result_warning = compute_ttc(400, 10)
+        result_danger = compute_ttc(100, 10)
+
+        self.assertIsNotNone(result_safe)
+        self.assertIsNotNone(result_warning)
+        self.assertIsNotNone(result_danger)
+        self.assertEqual(result_safe["state"], "SAFE")
+        self.assertEqual(result_warning["state"], "WARNING")
+        self.assertEqual(result_danger["state"], "DANGER")
+
+    def test_ttc_returns_none_when_opening(self) -> None:
+        self.assertIsNone(compute_ttc(120, 0))
+        self.assertIsNone(compute_ttc(120, -5))
 
     def test_predictive_collision_classifies_future_distance(self) -> None:
         trajectory_a = [{"lat": 9.591, "lon": 76.522}, {"lat": 9.591, "lon": 76.522}]

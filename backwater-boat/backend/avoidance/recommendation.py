@@ -11,12 +11,12 @@ def emergency_maneuver(relative_heading: float) -> str:
     return "STOP"
 
 
-def recommend_action(relative_heading: float, predicted_path: list[dict[str, Any]], ttc: float) -> str:
-    if ttc < 5:
+def recommend_action(relative_heading: float, predicted_path: list[dict[str, Any]], ttc: float | None) -> str:
+    if ttc is not None and ttc < 5:
         return emergency_maneuver(relative_heading)
     if not predicted_path:
         return "MAINTAIN"
-    if ttc < 10:
+    if ttc is not None and ttc < 10:
         return "SLOW_DOWN"
     if relative_heading >= 150:
         return "TURN_RIGHT"

@@ -72,8 +72,8 @@ def compute_risk(boat_a: dict[str, Any], boat_b: dict[str, Any]) -> dict[str, An
     lstm = score_trajectory(distance, relative_speed, heading_diff)
     distance_score = score_distance(distance)
     heading_score = score_heading(heading_diff)
-    ttc = distance / relative_speed if relative_speed > 0 else 999_999.0
-    ttc_score = 1 / (ttc + 1)
+    ttc = distance / relative_speed if relative_speed > 0 else None
+    ttc_score = 1 / (ttc + 1) if ttc is not None else 0.0
     risk = (
         0.5 * lstm
         + 0.2 * distance_score
@@ -89,5 +89,5 @@ def compute_risk(boat_a: dict[str, Any], boat_b: dict[str, Any]) -> dict[str, An
         "distance_m": round(distance, 2),
         "relative_speed": round(relative_speed, 2),
         "heading_difference": round(heading_diff, 2),
-        "ttc": round(ttc, 2),
+        "ttc": round(ttc, 2) if ttc is not None else None,
     }

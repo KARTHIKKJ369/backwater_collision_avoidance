@@ -67,13 +67,15 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
     prediction_result: dict[str, Any] | None = None
 
     if risk_result and other_boat_id:
-        ttc = compute_ttc(risk_result["distance_m"], risk_result["relative_speed"])
+        ttc_result = compute_ttc(risk_result["distance_m"], risk_result["relative_speed"])
+        ttc_value = ttc_result["ttc"] if ttc_result else None
+        ttc_payload = ttc_result if ttc_result else {"ttc": None, "state": "SAFE"}
         prediction_result = evaluate_pair(
             boat_id,
             other_boat_id,
             risk_result["distance_m"],
             risk_result["risk"],
-            ttc["ttc"],
+            ttc_value,
             scenario,
         )
         collision = prediction_result.get("collision") if prediction_result else None
@@ -86,7 +88,7 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
             action = recommend_action(
                 risk_result["heading_difference"],
                 prediction_result.get("prediction_a", {}).get("positions", []),
-                ttc["ttc"],
+                ttc_value,
             )
             if action != "MAINTAIN":
                 track_recommendation()
@@ -99,17 +101,18 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
                         "action": action,
                         "accepted": False,
                         "alert_state": state,
-                        "ttc": ttc["ttc"],
+                        "ttc": ttc_value,
                         "future_distance": collision["future_distance"],
                     },
                 )
 
             pair_key = ":".join(sorted([boat_id, other_boat_id]))
             if alert_manager.should_alert(pair_key, state):
+                ttc_text = f"{ttc_value:.2f}" if ttc_value is not None else "N/A"
                 message = (
                     f"{state} cooperative collision risk with {other_boat_id}: "
                     f"{collision['future_distance']} m future separation, "
-                    f"TTC {ttc['ttc']} s, action {action}"
+                    f"TTC {ttc_text} s, action {action}"
                 )
                 alert_id = alert_manager.save_alert(
                     boat_id,
@@ -125,7 +128,7 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
                         "boat_id": boat_id,
                         "other_boat_id": other_boat_id,
                         **risk_result,
-                        **ttc,
+                        **ttc_payload,
                         **collision,
                         "action": action,
                         "alert_state": state,

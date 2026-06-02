@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.risk_engine.risk_engine import haversine_m
+from ml.inference.predict import predict_future_positions
 
 
 def _state_for_distance(distance_m: float) -> str:
@@ -44,3 +45,12 @@ def predict_collision(trajectory_a: list[dict[str, Any]], trajectory_b: list[dic
         "future_distance": round(minimum_future_distance, 2),
         "alert_state": state,
     }
+
+
+def predict_collision_from_history(
+    history_a: list[dict[str, Any]],
+    history_b: list[dict[str, Any]],
+) -> dict[str, float | str]:
+    trajectory_a = predict_future_positions(history_a[-10:])
+    trajectory_b = predict_future_positions(history_b[-10:])
+    return predict_collision(trajectory_a, trajectory_b)
