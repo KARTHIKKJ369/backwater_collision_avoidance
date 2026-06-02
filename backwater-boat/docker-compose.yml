@@ -1,0 +1,51 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: backwater-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: backwater-backend
+    depends_on:
+      - mqtt
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      SQLITE_PATH: /app/backend/data/boats.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/app/backend/data
+
+  simulator:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    container_name: backwater-simulator
+    depends_on:
+      - mqtt
+      - backend
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: backwater-dashboard
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:5173"
+
+volumes:
+  backend-data:
