@@ -45,7 +45,7 @@ def make_boats(scenario: str) -> list[BoatState]:
     if module_name == "head_on":
         module_name = "head_on"
     if module_name in {"head_on", "crossing", "blind_turn", "sudden_stop"}:
-        module = importlib.import_module(f"simulator.scenarios.{module_name}")
+        module = importlib.import_module(f"scenarios.{module_name}")
         return [BoatState(**state) for state in module.make_states()]
 
     if scenario == "straight":
@@ -64,7 +64,7 @@ def make_boats(scenario: str) -> list[BoatState]:
 def update_scenario(boats: list[BoatState], scenario: str, tick: int) -> None:
     module_name = scenario.lower()
     if module_name in {"head_on", "crossing", "blind_turn", "sudden_stop"}:
-        module = importlib.import_module(f"simulator.scenarios.{module_name}")
+        module = importlib.import_module(f"scenarios.{module_name}")
         module.update(boats, tick)
     elif scenario == "collision":
         for boat in boats:
