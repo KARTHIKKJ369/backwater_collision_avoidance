@@ -61,6 +61,56 @@ def score_trajectory(distance_m: float, relative_speed: float, heading_diff: flo
     return max(proximity * 0.6 + closure * 0.4, crossing * proximity)
 
 
+def overtake_risk(boat_a: dict[str, Any], boat_b: dict[str, Any],
+                  distance_m: float, heading_diff: float) -> float:
+    """
+    Dedicated same-direction overtake / sudden-stop risk term.
+
+    Fires when:
+      - Both boats travelling in roughly the same direction (heading_diff < 20°)
+      - The following boat (a) is faster than the leading boat (b)
+      - They are close enough to matter (distance < 150 m)
+
+    Returns a score in [0, 1] that scales with speed differential and proximity.
+    This fills the gap that closing_speed() misses for same-direction pairs,
+    because the heading projection makes closing_speed ≈ constant even when
+    boat_b is decelerating hard.
+    """
+    if heading_diff >= 20:
+        return 0.0
+
+    speed_a = float(boat_a["speed"])
+    speed_b = float(boat_b["speed"])
+    delta = speed_a - speed_b          # positive = a closing on b
+
+    if delta <= 0 or distance_m >= 150:
+        return 0.0
+
+    # Scale: delta 3 m/s at 50 m → ~0.75 risk
+    speed_score   = min(1.0, delta / 6.0)
+    proximity_score = max(0.0, 1.0 - distance_m / 150.0)
+    return round(speed_score * proximity_score, 3)
+
+
+def is_diverging(boat_a: dict[str, Any], boat_b: dict[str, Any]) -> bool:
+    """
+    True when the two boats are moving apart — bearing from a to b is
+    more than 90° off each boat's heading, meaning neither is pointing
+    toward the other.  Used to suppress false alarms after a crossing
+    when boats have already passed.
+    """
+    bear_ab = bearing_deg(boat_a["lat"], boat_a["lon"],
+                          boat_b["lat"], boat_b["lon"])
+    bear_ba = (bear_ab + 180) % 360
+
+    # Component of each boat's velocity toward the other
+    approach_a = float(boat_a["speed"]) * cos(radians(float(boat_a["heading"]) - bear_ab))
+    approach_b = float(boat_b["speed"]) * cos(radians(float(boat_b["heading"]) - bear_ba))
+
+    # Both components negative → both moving away
+    return approach_a < 0 and approach_b < 0
+
+
 def warning_for_risk(risk: float) -> str:
     if risk < 0.4:
         return "SAFE"
@@ -83,22 +133,18 @@ def weather_factor(weather: dict[str, Any] | None) -> float:
 
     factor = 1.0
 
-    # Visibility: below 500 m (dense fog) → +0.3; scales linearly up to 5000 m
     visibility = float(weather.get("visibility_m", 10_000))
     if visibility < 5_000:
         factor += 0.3 * max(0.0, (5_000 - visibility) / 5_000)
 
-    # Wind speed: above 10 m/s adds up to +0.15
     wind = float(weather.get("wind_speed", 0))
     if wind > 10:
         factor += min(0.15, (wind - 10) / 20)
 
-    # Precipitation / fog flag from weather condition codes (OpenWeatherMap):
-    #   2xx = thunderstorm, 3xx = drizzle, 5xx = rain, 7xx = atmosphere (fog/mist)
     condition_id = int(weather.get("condition_id", 800))
-    if condition_id < 700:        # any precipitation
+    if condition_id < 700:
         factor += 0.1
-    elif 700 <= condition_id < 800:  # fog / mist / haze
+    elif 700 <= condition_id < 800:
         factor += 0.15
 
     return round(min(1.5, factor), 3)
@@ -109,31 +155,46 @@ def compute_risk(
     boat_b: dict[str, Any],
     weather: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    distance = haversine_m(boat_a["lat"], boat_a["lon"], boat_b["lat"], boat_b["lon"])
+    distance    = haversine_m(boat_a["lat"], boat_a["lon"], boat_b["lat"], boat_b["lon"])
     relative_speed = closing_speed(boat_a, boat_b)
-    heading_diff = heading_difference(float(boat_a["heading"]), float(boat_b["heading"]))
+    heading_diff   = heading_difference(float(boat_a["heading"]), float(boat_b["heading"]))
     obstacle = max(int(boat_a.get("obstacle", 0)), int(boat_b.get("obstacle", 0)))
 
-    traj_score = score_trajectory(distance, relative_speed, heading_diff)
+    traj_score     = score_trajectory(distance, relative_speed, heading_diff)
     distance_score = score_distance(distance)
-    heading_score = score_heading(heading_diff)
+    heading_score  = score_heading(heading_diff)
     ttc = distance / relative_speed if relative_speed > 0 else None
     ttc_score = 1 / (ttc + 1) if ttc is not None else 0.0
 
-    # Rebalanced weights — heading now 0.20 (was 0.10) so crossing scenarios
-    # correctly reach WARNING/DANGER.  TTC kept at 0.20.  Trajectory at 0.40
-    # (was 0.50) since it already embeds heading via score_heading().
-    risk = (
-        0.40 * traj_score
-        + 0.20 * distance_score
-        + 0.20 * heading_score
-        + 0.20 * ttc_score
-    )
+    # Same-direction overtake / sudden-stop term
+    ot_risk = overtake_risk(boat_a, boat_b, distance, heading_diff)
+
+    # Base risk — overtake_risk replaces some trajectory weight for same-dir pairs
+    if ot_risk > 0:
+        # Sudden-stop geometry: overtake term gets 0.35, trajectory shrinks to 0.25
+        risk = (
+            0.25 * traj_score
+            + 0.20 * distance_score
+            + 0.00 * heading_score   # near-zero for same-direction, skip
+            + 0.20 * ttc_score
+            + 0.35 * ot_risk
+        )
+    else:
+        risk = (
+            0.40 * traj_score
+            + 0.20 * distance_score
+            + 0.20 * heading_score
+            + 0.20 * ttc_score
+        )
+
+    # Crossing post-pass suppression — if both boats are diverging, cap at WARNING
+    if heading_diff >= 60 and is_diverging(boat_a, boat_b):
+        risk = min(risk, 0.59)
 
     # Obstacle proximity boost
     risk = max(risk, 0.45) if obstacle and distance < 150 else risk
 
-    # Weather amplification — scales linearly so fog/rain can push WARNING→DANGER
+    # Weather amplification
     w_factor = weather_factor(weather)
     risk = risk * w_factor
 

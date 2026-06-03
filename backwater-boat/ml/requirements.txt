@@ -1,2 +1,6 @@
-tensorflow==2.21.0
-numpy==2.1.0
+# --- Training (laptop only) ---
+tensorflow==2.16.2
+numpy==1.26.4
+
+# --- Pi inference (install instead of tensorflow) ---
+# tflite-runtime   # pip install tflite-runtime
