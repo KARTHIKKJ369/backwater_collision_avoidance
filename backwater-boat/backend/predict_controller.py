@@ -19,7 +19,11 @@ _prediction_latencies_ms: list[float] = []
 
 
 def should_run_prediction(distance_m: float, risk: float, ttc: float | None = None) -> bool:
-    return distance_m < 80 or (ttc is not None and ttc < 10) or risk > 0.5
+    # Aligned with README: trigger at 150 m, TTC < 15 s, or risk > 0.3.
+    # Previous thresholds (80 m / 0.5) were too conservative and caused
+    # CROSSING and SUDDEN_STOP to skip prediction entirely, producing
+    # zero DANGER alerts and 0.0 precision/F1 for those scenarios.
+    return distance_m < 150 or (ttc is not None and ttc < 15) or risk > 0.3
 
 
 def run_prediction(boat_id: str, scenario: str = "LIVE") -> dict[str, Any]:
@@ -53,7 +57,7 @@ def run_prediction_if_needed(
 ) -> dict[str, Any]:
     if should_run_prediction(distance_m, risk, ttc):
         return run_prediction(boat_id, scenario)
-    return skip_prediction(boat_id, "distance>=80, ttc>=10, and risk<=0.5")
+    return skip_prediction(boat_id, "distance>=150, ttc>=15, and risk<=0.3")
 
 
 def evaluate_pair(

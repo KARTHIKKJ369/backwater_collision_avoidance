@@ -44,7 +44,6 @@ def _avg_prediction_error(predictions: list[dict[str, Any]]) -> float:
 
 
 def _rows(table: str, scenario: str) -> list[dict[str, Any]]:
-    db.init_db()
     if scenario == "LIVE":
         return db.fetch_all(table, 10_000)
     return db.fetch_by_scenario(table, scenario, 10_000)

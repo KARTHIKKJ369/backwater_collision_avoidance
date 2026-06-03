@@ -11,8 +11,9 @@ from backend.database import db
 from backend.evaluation import evaluate, timeline as evaluation_timeline
 from backend.mqtt.mqtt_client import publish, store_message, subscribe
 from backend.predict_controller import manual_prediction, metrics as prediction_metrics
+from backend.weather.weather_client import get_weather_for_position, mock_weather
 
-app = FastAPI(title="Backwater Boat Collision Avoidance API", version="1.0.0")
+app = FastAPI(title="Backwater Boat Collision Avoidance API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,3 +122,29 @@ def evaluation(scenario: str = "LIVE") -> dict[str, float | int | str]:
 @app.get("/timeline")
 def timeline(scenario: str = "LIVE") -> list[dict[str, float | int | str | None]]:
     return evaluation_timeline(scenario)
+
+
+@app.get("/weather")
+def weather(lat: float, lon: float) -> dict[str, Any]:
+    """
+    Return live OpenWeatherMap data for a position.
+    Falls back to a CLEAR mock when OPENWEATHER_API_KEY is not set.
+    """
+    data = get_weather_for_position(lat, lon)
+    if data is None:
+        data = mock_weather("CLEAR")
+        data["source"] = "mock"
+    else:
+        data["source"] = "openweathermap"
+    return data
+
+
+@app.get("/weather/mock")
+def weather_mock(preset: str = "CLEAR") -> dict[str, Any]:
+    """
+    Return a mock weather preset for offline testing.
+    Presets: CLEAR, FOG, RAIN, STORM
+    """
+    data = mock_weather(preset)
+    data["source"] = "mock"
+    return data

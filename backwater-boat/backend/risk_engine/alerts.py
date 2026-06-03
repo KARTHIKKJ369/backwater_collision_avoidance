@@ -27,7 +27,7 @@ class AlertManager:
         score = risk or 0.0
         if score < 0.4:
             return SAFE
-        if score < 0.7:
+        if score < 0.6:
             return WARNING
         return DANGER
 

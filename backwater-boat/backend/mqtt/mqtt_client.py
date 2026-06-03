@@ -15,6 +15,7 @@ from backend.risk_engine.alerts import alert_manager
 from backend.risk_engine.early_warning import classify_future_distance
 from backend.risk_engine.risk_engine import compute_risk
 from backend.risk_engine.ttc import compute_ttc
+from backend.weather.weather_client import get_weather_for_position
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -52,11 +53,14 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
     alert_id: int | None = None
     other_boat_id: str | None = None
 
+    # Fetch weather once per message (cached — no extra HTTP per tick)
+    weather = get_weather_for_position(float(payload["lat"]), float(payload["lon"]))
+
     with _lock:
         for other_id, other_payload in _latest.items():
             if other_id == boat_id:
                 continue
-            candidate = compute_risk(payload, other_payload)
+            candidate = compute_risk(payload, other_payload, weather=weather)
             if candidate["risk"] > risk:
                 risk = candidate["risk"]
                 risk_result = candidate
@@ -109,10 +113,12 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
             pair_key = ":".join(sorted([boat_id, other_boat_id]))
             if alert_manager.should_alert(pair_key, state):
                 ttc_text = f"{ttc_value:.2f}" if ttc_value is not None else "N/A"
+                weather_desc = weather.get("description", "unknown") if weather else "unavailable"
                 message = (
                     f"{state} cooperative collision risk with {other_boat_id}: "
                     f"{collision['future_distance']} m future separation, "
-                    f"TTC {ttc_text} s, action {action}"
+                    f"TTC {ttc_text} s, action {action}, "
+                    f"weather: {weather_desc} (factor {risk_result.get('weather_factor', 1.0):.2f})"
                 )
                 alert_id = alert_manager.save_alert(
                     boat_id,
@@ -133,6 +139,7 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
                         "action": action,
                         "alert_state": state,
                         "message": message,
+                        "weather": weather,
                     },
                 )
 

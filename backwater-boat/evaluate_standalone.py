@@ -68,8 +68,8 @@ SCENARIOS = {
     },
     "SUDDEN_STOP": {
         "init": lambda: [
-            make_boat("B01", 9.5910, 76.5212, 6.0, 80),
-            make_boat("B02", 9.5911, 76.5224, 5.8, 80),
+            make_boat("B01", 9.5910, 76.5216, 6.0, 80),
+            make_boat("B02", 9.5911, 76.5220, 5.8, 80),
         ],
         "update": lambda states, tick: states[1].__setitem__(
             "speed", max(0.0, states[1]["speed"] - 0.8)
