@@ -9,3 +9,9 @@ backend/data/
 data/
 ml/model.h5
 results/live.csv
+-e 
+# Environment files
+.env
+.env.local
+-e ml/model.tflite
+ml/norm_params.json

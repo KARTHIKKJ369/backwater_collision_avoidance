@@ -15,9 +15,10 @@ services:
     depends_on:
       - mqtt
     environment:
-      MQTT_HOST: mqtt
-      MQTT_PORT: 1883
+      MQTT_HOST: ${MQTT_HOST:-mqtt}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       SQLITE_PATH: /app/backend/data/boats.db
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
     ports:
       - "8000:8000"
     volumes:
@@ -32,8 +33,24 @@ services:
       - mqtt
       - backend
     environment:
-      MQTT_HOST: mqtt
-      MQTT_PORT: 1883
+      MQTT_HOST: ${MQTT_HOST:-mqtt}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+    profiles:
+      - dev                         # only starts with: docker compose --profile dev up
+
+  # Uncomment when LoRa gateway is ready (Pi deployment)
+  # lora_gateway:
+  #   build:
+  #     context: .
+  #     dockerfile: firmware/lora_gateway/Dockerfile
+  #   container_name: backwater-lora-gw
+  #   depends_on: [mqtt]
+  #   network_mode: host
+  #   devices:
+  #     - /dev/spidev0.0:/dev/spidev0.0
+  #   environment:
+  #     MQTT_HOST: localhost
+  #     MQTT_PORT: 1883
 
   dashboard:
     build:
@@ -43,7 +60,7 @@ services:
     depends_on:
       - backend
     environment:
-      VITE_API_BASE: http://localhost:8000
+      VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
     ports:
       - "5173:5173"
 

@@ -67,6 +67,8 @@ def get_weather_for_position(lat: float, lon: float) -> dict[str, Any] | None:
     if time.time() - cached_at < CACHE_TTL_SECONDS and cached_data:
         return cached_data
 
+    if not OWM_API_KEY:
+        return mock_weather('CLEAR')   # offline / no key — no log spam
     data = _fetch_owm(lat, lon)
     if data:
         _cache[key] = (time.time(), data)

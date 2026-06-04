@@ -187,12 +187,14 @@ def compute_risk(
             + 0.20 * ttc_score
         )
 
-    # Crossing post-pass suppression — if both boats are diverging, cap at WARNING
-    if heading_diff >= 60 and is_diverging(boat_a, boat_b):
-        risk = min(risk, 0.59)
-
     # Obstacle proximity boost
     risk = max(risk, 0.45) if obstacle and distance < 150 else risk
+
+    # Post-pass suppression — if boats are no longer closing, suppress all alerts.
+    # Applied AFTER obstacle boost so it overrides it too.
+    cs = closing_speed(boat_a, boat_b)
+    if cs < 0.1:
+        risk = min(risk, 0.39)   # push below WARNING threshold (0.4)
 
     # Weather amplification
     w_factor = weather_factor(weather)

@@ -1,5 +1,5 @@
-scenario,alerts,predictions,collisions,avg_risk,latency,precision
-HEAD_ON,25,25,17,0.396,0.35,0.52
-CROSSING,45,45,32,0.443,0.33,0.356
-BLIND_TURN,56,56,36,0.453,0.36,0.321
-SUDDEN_STOP,29,42,41,0.371,0.33,0.024
+scenario,alerts,predictions,collisions,avg_risk,latency,precision,recall,f1,false_alarm_rate,TP,FP,FN,TN
+HEAD_ON,14,21,17,0.357,170.69,0.214,1.0,0.353,0.193,3,11,0,46
+CROSSING,29,38,32,0.417,69.94,0.345,1.0,0.513,0.317,10,19,0,41
+BLIND_TURN,21,41,36,0.4,63.89,0.238,0.625,0.345,0.222,5,16,3,56
+SUDDEN_STOP,6,42,41,0.367,61.32,1.0,0.231,0.375,0.0,6,0,20,34
