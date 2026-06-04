@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 def make_states() -> list[dict[str, float | int | str]]:
     return [
         {"boat_id": "B01", "lat": 9.5910, "lon": 76.5214, "speed": 4.6, "heading": 85, "obstacle": 0},
@@ -10,4 +9,6 @@ def make_states() -> list[dict[str, float | int | str]]:
 
 def update(states: list[object], tick: int) -> None:
     if tick > 30:
-        states[1].heading -= 0.4
+        for s in states:
+            if s.boat_id == "B02":
+                s.heading -= 0.4

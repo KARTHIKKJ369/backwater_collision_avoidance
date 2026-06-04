@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+ml/datasets/
+ml/training/
+results/
+dashboard/node_modules/
+dashboard/dist/
+docs/
+.git/
+.env
