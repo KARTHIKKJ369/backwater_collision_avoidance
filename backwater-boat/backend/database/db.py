@@ -231,6 +231,20 @@ def count_rows(table: str) -> int:
     return int(row["count"])
 
 
+def count_prediction_runs() -> int:
+    """Count distinct prediction events (not individual lat/lon points).
+
+    Each call to run_prediction() inserts up to FORECAST_STEPS (5–10) rows
+    all sharing the same (boat_id, timestamp) pair.  Counting rows directly
+    inflates the figure by that factor.  This query counts unique events.
+    """
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT COUNT(*) AS count FROM (SELECT 1 FROM prediction GROUP BY boat_id, timestamp)"
+    ).fetchone()
+    return int(row["count"])
+
+
 def average_risk(scenario: str | None = None) -> float:
     conn = get_connection()
     if scenario:

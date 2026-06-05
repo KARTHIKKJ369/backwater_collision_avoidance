@@ -100,7 +100,7 @@ def predict(payload: PredictIn) -> dict[str, Any]:
 def metrics() -> dict[str, float | int]:
     prediction = prediction_metrics()
     return {
-        "predictions_total": db.count_rows("prediction"),
+        "predictions_total": prediction["prediction_executed"],
         "alerts_total": db.count_rows("alerts"),
         "collisions_predicted": prediction["collisions_predicted"],
         "avg_prediction_latency_ms": prediction["avg_prediction_latency_ms"],

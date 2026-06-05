@@ -16,6 +16,10 @@ recommendations = 0
 accepted_actions = 0
 avoided_collisions = 0
 _prediction_latencies_ms: list[float] = []
+# Tracks the last alert_state seen for each pair key so we only count a
+# collision event once per distinct SAFE→non-SAFE transition, not once per
+# tick while the pair remains in a danger state.
+_pair_collision_state: dict[str, str] = {}
 
 
 def should_run_prediction(distance_m: float, risk: float, ttc: float | None = None) -> bool:
@@ -81,8 +85,15 @@ def evaluate_pair(
         }
 
     collision = predict_collision(prediction_a["positions"], prediction_b["positions"])
-    if collision["alert_state"] != "SAFE":
+    new_state = collision["alert_state"]
+
+    # Count a collision event only when this pair transitions into a non-SAFE
+    # state — not on every tick while it stays in that state.
+    pair_key = ":".join(sorted([boat_a, boat_b]))
+    old_state = _pair_collision_state.get(pair_key, "SAFE")
+    if new_state != "SAFE" and old_state == "SAFE":
         collisions_predicted += 1
+    _pair_collision_state[pair_key] = new_state
 
     return {
         "executed": True,

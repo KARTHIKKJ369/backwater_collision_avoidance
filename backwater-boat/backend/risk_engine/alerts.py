@@ -9,6 +9,9 @@ SAFE = "SAFE"
 WARNING = "WARNING"
 DANGER = "DANGER"
 
+# Severity ordering used for hysteresis comparisons
+_SEVERITY_RANK = {SAFE: 0, WARNING: 1, DANGER: 2}
+
 
 class AlertManager:
     def __init__(self, cooldown_seconds: float = 10.0) -> None:
@@ -36,13 +39,28 @@ class AlertManager:
         old_state = self._states.get(key, SAFE)
         last_alert_at = self._last_alert_at.get(key, 0.0)
 
+        # Always track current state so the next tick compares against reality,
+        # not a stale value that would re-trigger a suppressed transition.
+        self._states[key] = new_state
+
+        # Going back to SAFE: update state silently, no alert needed
+        if new_state == SAFE:
+            return False
+
+        # No change in severity: suppress
         if new_state == old_state:
             return False
-        if new_state == SAFE:
-            self._states[key] = new_state
+
+        # Only escalations (SAFE→WARNING, SAFE→DANGER, WARNING→DANGER) fire.
+        # A downgrade (DANGER→WARNING) is noise from a threshold-straddling
+        # risk score and must not trigger a new alert.
+        if _SEVERITY_RANK[new_state] <= _SEVERITY_RANK[old_state]:
             return False
+
+        # Cooldown applies even to genuine escalations.
         if now - last_alert_at < self.cooldown_seconds:
             return False
+
         return True
 
     def save_alert(

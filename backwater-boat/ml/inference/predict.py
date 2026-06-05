@@ -146,7 +146,7 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
     Return 5 predicted future positions for the given boat history.
 
     Resolution order:
-      1. TFLite model  (model.tflite)   ← used on Pi
+      1. TFLite model  (model.tflite)   ← used on Pi / container
       2. Keras model   (model.h5)       ← used on dev laptop
       3. Dead-reckoning fallback        ← used when no model exists yet
     """
@@ -155,8 +155,6 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
 
     norm = _load_norm()
     if norm is None:
-        # norm_params.json missing — model was trained without normalisation
-        # (old schema). Fall back so we never crash.
         return _dead_reckon(history)
 
     features = np.array(
@@ -168,13 +166,15 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
     if TFLITE_PATH.exists():
         result = _predict_tflite(features, norm)
         if result:
+            print("[INFERENCE] tflite", flush=True)
             return result
 
     # Try Keras (dev machines with full TF installed)
     if H5_PATH.exists():
         result = _predict_keras(features, norm)
         if result:
+            print("[INFERENCE] keras", flush=True)
             return result
 
-    # Last resort
+    print("[INFERENCE] dead-reckoning (no model loaded)", flush=True)
     return _dead_reckon(history)

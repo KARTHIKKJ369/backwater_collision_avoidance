@@ -3,3 +3,4 @@ uvicorn[standard]==0.30.1
 paho-mqtt==2.1.0
 pydantic==2.7.4
 numpy==1.26.4
+tflite-runtime==2.14.0

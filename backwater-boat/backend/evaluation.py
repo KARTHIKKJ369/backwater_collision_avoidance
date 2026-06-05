@@ -147,9 +147,22 @@ def evaluate(scenario: str = "LIVE") -> dict[str, float | int | str]:
     collision_alerts = [alert for alert in alerts if alert["severity"] == "DANGER"]
     warning_alerts = [alert for alert in alerts if alert["severity"] == "WARNING"]
     high_risk_samples = [row for row in telemetry if row["risk"] >= 0.5]
-    collisions = prediction["collisions_predicted"]
-    precision = _safe_div(len(collision_alerts), max(len(alerts), collisions))
-    recall = _safe_div(len(collision_alerts), len(high_risk_samples))
+
+    # Precision = TP / (TP + FP)
+    # TP: DANGER alerts that correspond to a genuinely high-risk situation
+    #     (proxied by whether a DANGER alert was issued during a high-risk sample window).
+    # FP: all other alerts (WARNING + DANGER alerts that weren't matched).
+    # We treat every DANGER alert as a positive prediction and every
+    # WARNING alert as a false positive from the alert perspective.
+    true_positives = len(collision_alerts)
+    false_positives = len(warning_alerts)
+    predicted_positives = true_positives + false_positives
+    precision = _safe_div(true_positives, predicted_positives)
+
+    # Recall = TP / (TP + FN)
+    # FN proxied by high-risk telemetry samples that produced no DANGER alert.
+    recall = _safe_div(true_positives, len(high_risk_samples)) if high_risk_samples else 0.0
+
     f1 = _safe_div(2 * precision * recall, precision + recall)
     timeline_rows = timeline(scenario)
     ttc_values = [row["ttc"] for row in timeline_rows if row.get("ttc") is not None]
@@ -168,8 +181,8 @@ def evaluate(scenario: str = "LIVE") -> dict[str, float | int | str]:
         "avg_ttc": round(mean(ttc_values), 2) if ttc_values else _avg_ttc(),
         "avg_prediction_error": round(mean(prediction_errors), 2) if prediction_errors else 0.0,
         "alerts": len(alerts),
-        "predictions": len(predictions),
-        "collisions": collisions,
+        "predictions": prediction["prediction_executed"],
+        "collisions": prediction["collisions_predicted"],
         "avg_risk": db.average_risk(None if scenario == "LIVE" else scenario),
         "latency": prediction["avg_prediction_latency_ms"],
     }
