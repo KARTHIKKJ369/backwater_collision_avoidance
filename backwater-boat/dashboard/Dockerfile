@@ -1,9 +1,13 @@
-FROM node:20-alpine
+FROM python:3.9-slim
 
 WORKDIR /app
-COPY dashboard/package.json /app/package.json
-RUN npm install
-COPY dashboard /app
+ENV PYTHONPATH=/app
 
-EXPOSE 5173
-CMD ["npm", "run", "dev"]
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+
+COPY backend /app/backend
+COPY ml /app/ml
+
+EXPOSE 8000
+CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

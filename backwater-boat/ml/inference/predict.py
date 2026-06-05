@@ -105,10 +105,17 @@ def _dead_reckon(history: list[dict[str, Any]],
 def _predict_tflite(features: np.ndarray,
                     norm: dict[str, float]) -> list[dict[str, float]] | None:
     try:
+        # Resolution order for the TFLite interpreter across environments:
+        #   tflite-runtime      — lightweight, Python ≤3.9, Pi/container target
+        #   ai-edge-litert      — Google's replacement package, Python 3.11+
+        #   tensorflow.lite     — full TF install fallback (dev laptop)
         try:
             import tflite_runtime.interpreter as tflite
         except ImportError:
-            import tensorflow.lite as tflite   # full TF fallback during dev
+            try:
+                import ai_edge_litert.interpreter as tflite
+            except ImportError:
+                import tensorflow.lite as tflite
 
         interp = tflite.Interpreter(model_path=str(TFLITE_PATH))
         interp.allocate_tensors()
@@ -118,7 +125,8 @@ def _predict_tflite(features: np.ndarray,
         interp.invoke()
         raw = interp.get_tensor(out_idx).reshape(FORECAST_STEPS, 2)
         return _with_confidence(_decode_output(raw, norm))
-    except Exception:
+    except Exception as exc:
+        print(f"[INFERENCE] tflite failed: {exc}", flush=True)
         return None
 
 
