@@ -13,7 +13,7 @@ H5_PATH      = MODEL_DIR / "model.h5"
 NORM_PATH    = MODEL_DIR / "norm_params.json"
 
 WINDOW_SIZE    = 10
-FORECAST_STEPS = 5
+FORECAST_STEPS = 15
 
 
 # ------------------------------------------------------------------

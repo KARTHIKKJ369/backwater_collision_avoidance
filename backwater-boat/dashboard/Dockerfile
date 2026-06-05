@@ -1,13 +1,18 @@
-FROM python:3.9-slim
+FROM node:20-alpine
 
 WORKDIR /app
-ENV PYTHONPATH=/app
 
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+# Copy package files first to leverage Docker layer caching
+COPY dashboard/package*.json ./
 
-COPY backend /app/backend
-COPY ml /app/ml
+# Install frontend dependencies
+RUN npm install
 
-EXPOSE 8000
-CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copy the rest of the dashboard source code
+COPY dashboard/ ./
+
+# Expose the standard Vite development port
+EXPOSE 5173
+
+# Start the Vite server and bind to 0.0.0.0 so it is accessible from your host machine
+CMD ["npm", "run", "dev", "--", "--host"]
