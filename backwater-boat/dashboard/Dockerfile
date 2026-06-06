@@ -1,18 +1,16 @@
-FROM node:20-alpine
+FROM oven/bun:1
 
 WORKDIR /app
 
-# Copy package files first to leverage Docker layer caching
-COPY dashboard/package*.json ./
+# Install dependencies
+COPY dashboard/package.json ./
+COPY dashboard/bun.lock ./
 
-# Install frontend dependencies
-RUN npm install
+RUN bun install
 
-# Copy the rest of the dashboard source code
+# Copy source
 COPY dashboard/ ./
 
-# Expose the standard Vite development port
 EXPOSE 5173
 
-# Start the Vite server and bind to 0.0.0.0 so it is accessible from your host machine
-CMD ["npm", "run", "dev", "--", "--host"]
+CMD ["bun", "run", "dev", "--host", "0.0.0.0"]
