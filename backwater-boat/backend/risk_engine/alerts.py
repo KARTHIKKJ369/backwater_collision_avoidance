@@ -22,37 +22,19 @@ class AlertManager:
         # consecutive non-SAFE ticks seen for each pair before an alert fires
         self._pending: dict[str, int] = {}
 
-    def transition_state(self, risk: float | None = None, future_distance: float | None = None) -> str:
-        if future_distance is not None:
-            if future_distance > 100:
-                return SAFE
-            if future_distance >= 50:
-                return WARNING
-            return DANGER
-
-        score = risk or 0.0
-        if score < 0.45:
-            return SAFE
-        if score <= 0.65:
-            return WARNING
-        return DANGER
 
     def should_alert(self, key: str, new_state: str, now: float | None = None) -> bool:
         now = now or time.time()
         old_state = self._states.get(key, SAFE)
         last_alert_at = self._last_alert_at.get(key, 0.0)
 
-        # Always track current state so the next tick compares against reality,
-        # not a stale value that would re-trigger a suppressed transition.
-        self._states[key] = new_state
-
-        # Going back to SAFE: reset confirmation counter, no alert needed
+        # Going back to SAFE: reset confirmation counter, commit immediately
         if new_state == SAFE:
+            self._states[key] = SAFE
             self._pending[key] = 0
             return False
 
-        # No change in severity: suppress (but still increment pending so an
-        # existing escalation keeps building its confirmation count)
+        # No change in severity: suppress
         if new_state == old_state:
             return False
 
@@ -69,12 +51,16 @@ class AlertManager:
         # Confirmation window: require confirm_ticks consecutive non-SAFE readings
         # before firing.  DANGER bypasses (only needs 1 tick) to preserve recall
         # in fast-closing scenarios such as HEAD_ON at high speed.
+        # NOTE: state is NOT committed until the alert fires — committing early
+        # would make old_state == new_state on the next tick, which would cause
+        # the "no change" guard above to suppress the confirmation counter.
         pending = self._pending.get(key, 0) + 1
         self._pending[key] = pending
         if new_state == WARNING and pending < self.confirm_ticks:
             return False
 
-        # Reset counter once an alert fires
+        # Alert fires: commit state and reset counter
+        self._states[key] = new_state
         self._pending[key] = 0
         return True
 

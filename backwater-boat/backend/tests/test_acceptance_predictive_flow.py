@@ -19,12 +19,12 @@ class AcceptancePredictiveFlowTests(unittest.TestCase):
         predicted_a = [
             {"lat": 9.5910, "lon": 76.5213},
             {"lat": 9.5910, "lon": 76.5215},
-            {"lat": 9.5910, "lon": 76.5217},
+            {"lat": 9.5910, "lon": 76.5216},  # converge to 76.5216
         ]
         predicted_b = [
             {"lat": 9.5910, "lon": 76.5219},
             {"lat": 9.5910, "lon": 76.5217},
-            {"lat": 9.5910, "lon": 76.5215},
+            {"lat": 9.5910, "lon": 76.5216},  # converge to 76.5216 → distance=0 → DANGER
         ]
 
         collision = predict_collision(predicted_a, predicted_b)

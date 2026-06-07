@@ -12,7 +12,7 @@ from backend.avoidance.recommendation import recommend_action
 from backend.database import db
 from backend.predict_controller import evaluate_pair, track_ack, track_recommendation, track_warning
 from backend.risk_engine.alerts import alert_manager
-from backend.risk_engine.early_warning import classify_future_distance
+
 from backend.risk_engine.risk_engine import compute_risk
 from backend.risk_engine.ttc import compute_ttc
 from backend.weather.weather_client import get_weather_for_position
@@ -85,7 +85,11 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
         collision = prediction_result.get("collision") if prediction_result else None
 
         if collision:
-            state = classify_future_distance(collision["future_distance"])
+            # alert_state is already computed by predict_collision using the
+            # dynamic safety/warning radius — use it directly rather than
+            # reclassifying via classify_future_distance (which returns
+            # "EARLY_WARNING" and would cause a KeyError in should_alert).
+            state = collision["alert_state"]
 
             # ── Ghost-prediction guard ──────────────────────────────────────────
             # When the LSTM/dead-reckoning has too little history it can predict a

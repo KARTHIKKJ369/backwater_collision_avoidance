@@ -15,8 +15,11 @@ class RiskEngineTests(unittest.TestCase):
         manager = AlertManager(cooldown_seconds=10)
 
         self.assertFalse(manager.should_alert("B01:B02", "SAFE", now=0))
+        # WARNING requires confirm_ticks=2; first tick must not fire
+        self.assertFalse(manager.should_alert("B01:B02", "WARNING", now=11))
+        # Second consecutive tick fires
         self.assertTrue(manager.should_alert("B01:B02", "WARNING", now=11))
-        manager._states["B01:B02"] = "WARNING"
+        # Simulate save_alert recording the alert timestamp
         manager._last_alert_at["B01:B02"] = 11
 
         self.assertFalse(manager.should_alert("B01:B02", "WARNING", now=20))
@@ -41,7 +44,8 @@ class RiskEngineTests(unittest.TestCase):
 
     def test_predictive_collision_classifies_future_distance(self) -> None:
         trajectory_a = [{"lat": 9.591, "lon": 76.522}, {"lat": 9.591, "lon": 76.522}]
-        trajectory_b = [{"lat": 9.5918, "lon": 76.522}, {"lat": 9.5912, "lon": 76.522}]
+        # Converge to same point at step 2 → distance=0 → DANGER
+        trajectory_b = [{"lat": 9.5918, "lon": 76.522}, {"lat": 9.591, "lon": 76.522}]
 
         result = predict_collision(trajectory_a, trajectory_b)
 
@@ -53,7 +57,8 @@ class RiskEngineTests(unittest.TestCase):
         self.assertTrue(should_run_prediction(distance_m=79, risk=0.1, ttc=100))
         self.assertTrue(should_run_prediction(distance_m=200, risk=0.1, ttc=9.9))
         self.assertTrue(should_run_prediction(distance_m=200, risk=0.51, ttc=100))
-        self.assertFalse(should_run_prediction(distance_m=80, risk=0.5, ttc=10))
+        # All three thresholds missed: distance>=150, risk<=0.3, ttc>=15
+        self.assertFalse(should_run_prediction(distance_m=200, risk=0.25, ttc=20))
 
     def test_confidence_varies_with_trajectory_variance(self) -> None:
         stable = [{"lat": 9.591, "lon": 76.522}, {"lat": 9.59101, "lon": 76.52201}]

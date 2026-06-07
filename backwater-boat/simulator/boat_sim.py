@@ -120,20 +120,22 @@ class BoatState:
         )
 
         if action == "TURN_RIGHT":
-
             self.heading += 15
 
         elif action == "TURN_LEFT":
-
             self.heading -= 15
 
         elif action == "HARD_RIGHT":
-
             self.heading += 30
 
-        elif action == "SLOW_DOWN":
+        elif action == "HARD_LEFT":
+            self.heading -= 30
 
+        elif action == "SLOW_DOWN":
             self.speed *= 0.8
+
+        elif action == "STOP":
+            self.speed = 0.0
 
         print(
             f"[SIM] "
