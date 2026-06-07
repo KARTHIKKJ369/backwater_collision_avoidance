@@ -1,13 +1,14 @@
-import { Activity, AlertTriangle, Anchor, Clock, Map as MapIcon } from "lucide-react";
+import { Activity, AlertTriangle, Anchor, Clock, Clapperboard, Map as MapIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type TabId = "map" | "collision" | "analytics" | "logs";
+export type TabId = "map" | "collision" | "analytics" | "logs" | "scenarios";
 
 const tabs: { id: TabId; label: string; icon: typeof MapIcon }[] = [
   { id: "map", label: "Live Map", icon: MapIcon },
   { id: "collision", label: "Collision", icon: AlertTriangle },
   { id: "analytics", label: "Analytics", icon: Activity },
   { id: "logs", label: "Logs", icon: Clock },
+  { id: "scenarios", label: "Scenarios", icon: Clapperboard },
 ];
 
 type Props = {

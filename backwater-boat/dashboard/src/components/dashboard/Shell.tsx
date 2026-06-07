@@ -7,6 +7,7 @@ import LiveMap from "./LiveMap";
 import Collision from "./Collision";
 import Analytics from "./Analytics";
 import Logs from "./Logs";
+import ScenarioSelector from "./ScenarioSelector";
 
 export default function Shell() {
   const [active, setActive] = useState<TabId>("map");
@@ -80,6 +81,7 @@ export default function Shell() {
             <Analytics evaluation={data.evaluation} timeline={data.timeline} telemetry={data.telemetry} />
           )}
           {active === "logs" && <Logs alerts={data.alerts} telemetry={data.telemetry} />}
+          {active === "scenarios" && <ScenarioSelector />}
         </main>
       </div>
     </div>
