@@ -114,6 +114,15 @@ def metrics() -> dict[str, float | int]:
     }
 
 
+@app.post("/boats/{boat_id}/ack")
+def ack_recommendation(boat_id: str, payload: dict[str, Any] = {}) -> dict[str, Any]:
+    """Mark a recommendation as accepted and publish the ack to MQTT."""
+    action = str(payload.get("action", ""))
+    rec_id = db.mark_recommendation_accepted(boat_id, action)
+    publish(f"boats/{boat_id}/ack", {"boat_id": boat_id, "action": action, "accepted": True})
+    return {"boat_id": boat_id, "accepted": True, "recommendation_id": rec_id}
+
+
 @app.get("/evaluation")
 def evaluation(scenario: str = "LIVE") -> dict[str, float | int | str]:
     return evaluate(scenario)

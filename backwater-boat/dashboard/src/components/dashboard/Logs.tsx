@@ -37,7 +37,7 @@ export default function Logs({ alerts, telemetry }: { alerts: Alert[]; telemetry
                 <Icon className="size-4 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-3">
-                    <strong className="text-xs uppercase tracking-wider">{al.type || "EVENT"}</strong>
+                    <strong className="text-xs uppercase tracking-wider">{al.severity || "EVENT"}</strong>
                     <span className="text-[10px] font-mono text-zinc-500 shrink-0">{fmtTime(al.timestamp)}</span>
                   </div>
                   <p className="text-xs text-zinc-400 mt-1 leading-relaxed break-words">

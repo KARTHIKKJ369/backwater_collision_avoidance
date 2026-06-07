@@ -32,12 +32,12 @@ export type Weather = {
   temperature?: number;
 };
 
-export type Recommendation = { action?: string; reason?: string; timestamp?: string };
+export type Recommendation = { action?: string; reason?: string; timestamp?: string; alert_state?: string; scenario?: string; };
 
 export type RiskLevel = "safe" | "warning" | "danger";
 
 export function riskClass(risk = 0): RiskLevel {
-  if (risk > 0.7) return "danger";
+  if (risk > 0.65) return "danger";
   if (risk >= 0.4) return "warning";
   return "safe";
 }

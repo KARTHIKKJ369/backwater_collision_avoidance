@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Polyline, Circle, Popup, Tooltip } from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
@@ -76,7 +76,7 @@ export default function LiveMap({ center, latest, predictions, telemetry }: Prop
             const solid = pts.slice(0, 5);
             const uncertain = pts.slice(4);
             return (
-              <div key={`pred-${b.boat_id}`}>
+              <Fragment key={`pred-${b.boat_id}`}>
                 <Polyline positions={solid.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]} pathOptions={{ color, weight: 3, opacity: 0.9 }} />
                 <Polyline positions={uncertain.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]} pathOptions={{ color, weight: 2, opacity: 0.4, dashArray: "5 5" }} />
                 {(() => {
@@ -102,7 +102,7 @@ export default function LiveMap({ center, latest, predictions, telemetry }: Prop
                     </Circle>
                   );
                 })()}
-              </div>
+              </Fragment>
             );
           })}
 

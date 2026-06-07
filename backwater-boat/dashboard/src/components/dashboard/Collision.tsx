@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Polyline, Circle } from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
@@ -48,15 +48,34 @@ export default function Collision({
     () => (boatA && boatB ? haversine(boatA.lat, boatA.lon, boatB.lat, boatB.lon) : 0),
     [boatA, boatB],
   );
-  const relSpeed = useMemo(
-    () => (boatA && boatB ? Math.max(0.1, Math.abs(boatA.speed - boatB.speed)) : 0.1),
-    [boatA, boatB],
-  );
-  const ttc = distance ? distance / relSpeed : null;
+
+  // Compute closing speed: component of relative velocity along the line of sight.
+  // Uses each boat's actual heading to project its velocity toward the other.
+  const { closingSpeed, ttc } = useMemo(() => {
+    if (!boatA || !boatB || !distance) return { closingSpeed: 0, ttc: null as number | null };
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    // Unit vector A → B in (lon, lat) space (flat-earth approximation, fine at short range)
+    const dLat = boatB.lat - boatA.lat;
+    const dLon = boatB.lon - boatA.lon;
+    const norm = Math.sqrt(dLat * dLat + dLon * dLon);
+    if (norm < 1e-12) return { closingSpeed: 0, ttc: 0 as number | null };
+    const ux = dLon / norm; // east component of unit vector A→B
+    const uy = dLat / norm; // north component
+    // Velocity components (heading = degrees clockwise from north)
+    const vAx = Number(boatA.speed) * Math.sin(toRad(Number(boatA.heading)));
+    const vAy = Number(boatA.speed) * Math.cos(toRad(Number(boatA.heading)));
+    const vBx = Number(boatB.speed) * Math.sin(toRad(Number(boatB.heading)));
+    const vBy = Number(boatB.speed) * Math.cos(toRad(Number(boatB.heading)));
+    // Closing speed = projection of (vA − vB) along A→B; positive means approaching
+    const cs = (vAx - vBx) * ux + (vAy - vBy) * uy;
+    if (cs <= 0) return { closingSpeed: 0, ttc: null as number | null }; // diverging
+    return { closingSpeed: cs, ttc: distance / cs };
+  }, [boatA, boatB, distance]);
   const futureDist = useMemo(
     () => futureSeparation(groupedPredictions[boatA?.boat_id ?? ""], groupedPredictions[boatB?.boat_id ?? ""]),
     [groupedPredictions, boatA, boatB],
   );
+  const [ackState, setAckState] = useState<"idle" | "pending" | "done">("idle");
   const confidence = averageConfidence(predictions);
 
   const risk = boatA && boatB ? Math.max(Number(boatA.risk || 0), Number(boatB.risk || 0)) : 0;
@@ -100,19 +119,19 @@ export default function Collision({
             const solid = pts.slice(0, 5);
             const uncertain = pts.slice(4);
             return (
-              <div key={`p-${id}`}>
+              <Fragment key={`p-${id}`}>
                 <Polyline positions={solid.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]} pathOptions={{ color, weight: 3, opacity: 0.9 }} />
                 <Polyline
                   positions={uncertain.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]}
                   pathOptions={{ color, weight: 2, opacity: 0.4, dashArray: "5 5" }}
                 />
-              </div>
+              </Fragment>
             );
           })}
           {safe.map((b) => (
             <Marker key={b.boat_id} position={[b.lat, b.lon]} icon={makeIcon(Number(b.heading || 0), riskClass(b.risk))} />
           ))}
-          {risk > 0.7 && boatA && boatB && (
+          {risk > 0.65 && boatA && boatB && (
             <Circle
               center={[(boatA.lat + boatB.lat) / 2, (boatA.lon + boatB.lon) / 2]}
               radius={60}
@@ -152,8 +171,8 @@ export default function Collision({
                 </div>
                 <p className="text-sm text-zinc-100 font-medium truncate">{action}</p>
               </div>
-              {latestRec?.reason && (
-                <p className="text-[12px] text-zinc-400 mt-2 leading-snug">{latestRec.reason}</p>
+              {latestRec?.alert_state && (
+                <p className="text-[12px] text-zinc-400 mt-2 leading-snug">{latestRec.alert_state}</p>
               )}
             </div>
           </section>
@@ -195,7 +214,7 @@ export default function Collision({
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[11px] font-mono">
                   <span className="text-zinc-500">Closing speed</span>
-                  <span className="text-zinc-300">{relSpeed.toFixed(1)} m/s</span>
+                  <span className="text-zinc-300">{closingSpeed > 0 ? `${closingSpeed.toFixed(1)} m/s` : "diverging"}</span>
                 </div>
                 <p className="text-[10px] text-zinc-500 leading-snug">How fast the gap is shrinking. Higher = less reaction time.</p>
               </div>
@@ -229,13 +248,36 @@ export default function Collision({
 
         {/* Footer */}
         <div className="p-3 border-t border-white/5 shrink-0">
-          <button className={`w-full text-sm font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${
-            tone === "danger"
-              ? "bg-danger text-zinc-950 hover:brightness-110"
-              : "bg-zinc-100 text-zinc-950 hover:bg-white"
-          }`}>
-            Acknowledge Alert
-            <kbd className="text-[10px] bg-black/15 px-1.5 rounded">ENTER</kbd>
+          <button
+            disabled={ackState !== "idle"}
+            onClick={async () => {
+              if (!boatA || ackState !== "idle") return;
+              setAckState("pending");
+              try {
+                const API_BASE =
+                  (import.meta.env.VITE_API_BASE as string | undefined) || "http://localhost:8000";
+                await fetch(`${API_BASE}/boats/${boatA.boat_id}/ack`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: latestRec?.action || "", accepted: true }),
+                });
+                setAckState("done");
+                setTimeout(() => setAckState("idle"), 3000);
+              } catch {
+                setAckState("idle");
+              }
+            }}
+            className={`w-full text-sm font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${
+              ackState === "done"
+                ? "bg-safe text-zinc-950 cursor-default"
+                : ackState === "pending"
+                ? "bg-zinc-400 text-zinc-950 cursor-wait opacity-70"
+                : tone === "danger"
+                ? "bg-danger text-zinc-950 hover:brightness-110"
+                : "bg-zinc-100 text-zinc-950 hover:bg-white"
+            }`}>
+            {ackState === "done" ? "Alert acknowledged ✓" : ackState === "pending" ? "Acknowledging…" : "Acknowledge Alert"}
+            {ackState === "idle" && <kbd className="text-[10px] bg-black/15 px-1.5 rounded">ENTER</kbd>}
           </button>
         </div>
       </aside>
