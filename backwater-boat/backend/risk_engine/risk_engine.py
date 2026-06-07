@@ -112,9 +112,9 @@ def is_diverging(boat_a: dict[str, Any], boat_b: dict[str, Any]) -> bool:
 
 
 def warning_for_risk(risk: float) -> str:
-    if risk < 0.4:
+    if risk < 0.45:
         return "SAFE"
-    if risk <= 0.6:
+    if risk <= 0.65:
         return "WARNING"
     return "DANGER"
 

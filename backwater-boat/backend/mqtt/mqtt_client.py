@@ -86,6 +86,22 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
 
         if collision:
             state = classify_future_distance(collision["future_distance"])
+
+            # ── Ghost-prediction guard ──────────────────────────────────────────
+            # When the LSTM/dead-reckoning has too little history it can predict a
+            # near-zero future separation while boats are still far apart (e.g.
+            # future_distance=1.69 m at actual distance=222 m in HEAD_ON at t=2.5).
+            # Suppress the alert if future separation < 5 % of current real
+            # distance AND boats are still more than 80 m away.
+            current_distance = risk_result.get("distance_m", 0.0)
+            future_dist = collision["future_distance"]
+            if (
+                future_dist > 0
+                and future_dist < current_distance * 0.05
+                and current_distance > 80
+            ):
+                state = "SAFE"  # prediction not yet reliable — skip alert
+
             if state != "SAFE":
                 track_warning()
 
