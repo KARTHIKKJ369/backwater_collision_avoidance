@@ -27,11 +27,22 @@ def _load_norm() -> dict[str, float] | None:
 
 
 def _encode_row(row: dict[str, Any], norm: dict[str, float]) -> list[float]:
-    lat_n = (float(row["lat"]) - norm["lat_mu"]) / norm["lat_sd"]
-    lon_n = (float(row["lon"]) - norm["lon_mu"]) / norm["lon_sd"]
+    # Kinematic channels (must match train_lstm.py encode_features exactly)
+    lat_n = (float(row["lat"])     - norm["lat_mu"]) / norm["lat_sd"]
+    lon_n = (float(row["lon"])     - norm["lon_mu"]) / norm["lon_sd"]
     spd_n = float(row["speed"]) / 10.0
     h_rad = math.radians(float(row["heading"]))
-    return [lat_n, lon_n, spd_n, math.sin(h_rad), math.cos(h_rad)]
+
+    # IMU channels — fall back gracefully if field missing (e.g. dead-reckon history)
+    ax_n  = (float(row.get("ax",   0.0)) - norm["ax_mu"]) / norm["ax_sd"]
+    ay_n  = (float(row.get("ay",   0.0)) - norm["ay_mu"]) / norm["ay_sd"]
+    az_n  = (float(row.get("az",  9.81)) - norm["az_mu"]) / norm["az_sd"]
+    gx_n  = (float(row.get("gx",  0.0)) - norm["gx_mu"]) / norm["gx_sd"]
+    gy_n  = (float(row.get("gy",  0.0)) - norm["gy_mu"]) / norm["gy_sd"]
+    gz_n  = (float(row.get("gz",  0.0)) - norm["gz_mu"]) / norm["gz_sd"]
+
+    return [lat_n, lon_n, spd_n, math.sin(h_rad), math.cos(h_rad),
+            ax_n, ay_n, az_n, gx_n, gy_n, gz_n]
 
 
 def _decode_output(raw: np.ndarray, norm: dict[str, float]) -> list[dict[str, float]]:
@@ -168,7 +179,7 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
     features = np.array(
         [_encode_row(p, norm) for p in history[-WINDOW_SIZE:]],
         dtype=np.float32,
-    ).reshape(1, WINDOW_SIZE, 5)   # 5 features after sin/cos encoding
+    ).reshape(1, WINDOW_SIZE, 11)  # 11 features: kin(5) + imu(6)
 
     # Try TFLite first (fast, Pi-friendly)
     if TFLITE_PATH.exists():

@@ -190,10 +190,20 @@ def compute_risk(
     # Obstacle proximity boost
     risk = max(risk, 0.45) if obstacle and distance < 150 else risk
 
-    # Post-pass suppression — if boats are no longer closing, suppress all alerts.
-    # Applied AFTER obstacle boost so it overrides it too.
+    # Sudden-stop imminent collision boost:
+    # When a large speed differential exists at close range (ot_risk > 0.5),
+    # the overtake term alone doesn't always push risk past DANGER (0.6).
+    # Boost to ensure DANGER fires before physical impact.
+    if ot_risk > 0.5 and distance < 50:
+        risk = max(risk, 0.65)
+
+    # Post-pass suppression — suppress alerts when boats are no longer closing
+    # AND there is no overtake/sudden-stop risk (ot_risk near zero).
+    # Guarding on ot_risk prevents the suppressor from silencing a genuine
+    # sudden-stop event: after B01 overtakes a stopped B02, closing_speed
+    # drops to 0 but ot_risk remains high while they are still very close.
     cs = closing_speed(boat_a, boat_b)
-    if cs < 0.1:
+    if cs < 0.1 and ot_risk < 0.1:
         risk = min(risk, 0.39)   # push below WARNING threshold (0.4)
 
     # Weather amplification

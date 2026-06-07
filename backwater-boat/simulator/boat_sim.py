@@ -5,6 +5,7 @@ import importlib
 import json
 import math
 import os
+import random
 import threading
 import time
 from dataclasses import dataclass
@@ -32,11 +33,39 @@ class BoatState:
     active_action: str | None = None
     action_until: int = 0
 
+    # IMU channels — derived each tick in step()
+    ax: float = 0.0   # forward accel   (m/s²)
+    ay: float = 0.0   # lateral accel   (m/s²)
+    az: float = 9.81  # vertical + heave (m/s²)
+    gx: float = 0.0   # roll rate       (rad/s)
+    gy: float = 0.0   # pitch rate      (rad/s)
+    gz: float = 0.0   # yaw rate        (rad/s)
+
+    # Previous-tick kinematics needed to derive IMU deltas
+    _prev_speed: float = 0.0
+    _prev_heading: float = 0.0
+
     def __post_init__(self):
         self.base_speed = self.speed
         self.base_heading = self.heading
+        self._prev_speed = self.speed
+        self._prev_heading = self.heading
 
     def step(self) -> None:
+        # --- Derive IMU channels from kinematic delta (DT = 1 s) ---
+        self.ax = round(self.speed - self._prev_speed, 4)
+
+        delta_h = (self.heading - self._prev_heading + 180) % 360 - 180
+        self.gz = round(math.radians(delta_h), 4)          # yaw rate rad/s
+        self.ay = round(self.speed * self.gz, 4)           # centripetal m/s²
+        self.az = round(9.81 + random.gauss(0, 0.05), 4)  # gravity + heave
+        self.gx = round(random.gauss(0, 0.02), 5)         # wave roll
+        self.gy = round(random.gauss(0, 0.02), 5)         # wave pitch
+
+        self._prev_speed   = self.speed
+        self._prev_heading = self.heading
+
+        # --- Advance position ---
         rad = math.radians(self.heading)
 
         self.lat += (
@@ -128,6 +157,13 @@ class BoatState:
             "speed": round(self.speed, 2),
             "heading": round(self.heading % 360, 2),
             "obstacle": self.obstacle,
+            # IMU channels — derived from kinematics in step()
+            "ax": self.ax,
+            "ay": self.ay,
+            "az": self.az,
+            "gx": self.gx,
+            "gy": self.gy,
+            "gz": self.gz,
         }
 
 

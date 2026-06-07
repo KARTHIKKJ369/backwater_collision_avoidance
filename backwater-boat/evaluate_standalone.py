@@ -85,13 +85,16 @@ SCENARIOS = {
         "ticks": 80,
     },
     "SUDDEN_STOP": {
+        # B01 follows at 7 m/s, B02 starts braking sharply at tick 5.
+        # Starting gap ~45m; B01 closes quickly given the 1.2 m/s initial
+        # differential plus B02's deceleration — realistic canal emergency.
         "init": lambda: [
-            make_boat("B01", 9.5910, 76.5216, 6.0, 80),
+            make_boat("B01", 9.5910, 76.5216, 7.0, 80),
             make_boat("B02", 9.5911, 76.5220, 5.8, 80),
         ],
         "update": lambda states, tick: states[1].__setitem__(
             "speed", max(0.0, states[1]["speed"] - 0.8)
-        ) if tick > 15 else None,
+        ) if tick > 5 else None,
         "ticks": 60,
     },
 }
@@ -128,7 +131,6 @@ def run_scenario(name: str, cfg: dict) -> dict:
         if ttc is not None:
             ttc_values.append(ttc)
 
-        # Ground truth: close AND still approaching (not post-pass)
         in_danger_zone = (dist < COLLISION_DIST_M) and (cs > 0.1)
 
         alerted    = warning in ("WARNING", "DANGER")
