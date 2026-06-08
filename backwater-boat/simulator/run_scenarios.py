@@ -35,7 +35,7 @@ def run_scenario(name: str, duration: int, interval: float) -> dict[str, float |
         update_scenario(boats, scenario, tick)
         for boat in boats:
             boat.step()
-            payload = boat.payload(tick)
+            payload = boat.payload(time.time())  # real Unix time — was: tick (integer)
             payload["scenario"] = name
             client.publish(f"boats/{boat.boat_id}/sensor", json.dumps(payload), qos=0)
         time.sleep(interval)

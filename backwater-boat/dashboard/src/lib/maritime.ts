@@ -13,6 +13,7 @@ export type Prediction = {
   pred_lat: number;
   pred_lon: number;
   confidence: number;
+  timestamp?: number;
 };
 
 export type Alert = {

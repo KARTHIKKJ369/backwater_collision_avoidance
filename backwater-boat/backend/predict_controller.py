@@ -71,6 +71,8 @@ def evaluate_pair(
     risk: float,
     ttc: float | None = None,
     scenario: str = "LIVE",
+    speed_a: float = 0.0,
+    speed_b: float = 0.0,
 ) -> dict[str, Any]:
     global collisions_predicted
     prediction_a = run_prediction_if_needed(boat_a, distance_m, risk, ttc, scenario)
@@ -84,7 +86,16 @@ def evaluate_pair(
             "collision": None,
         }
 
-    collision = predict_collision(prediction_a["positions"], prediction_b["positions"])
+    # Pass real boat speeds so predict_collision can set a dynamic safety radius
+    # (safety_radius = max(20m, speed × reaction_time)).  The previous call used
+    # the defaults (speed_a=0, speed_b=0), which pinned the radius to 20 m
+    # regardless of how fast the boats were travelling.
+    collision = predict_collision(
+        prediction_a["positions"],
+        prediction_b["positions"],
+        speed_a=speed_a,
+        speed_b=speed_b,
+    )
     new_state = collision["alert_state"]
 
     # Count a collision event only when this pair transitions into a non-SAFE

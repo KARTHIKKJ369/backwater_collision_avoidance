@@ -398,7 +398,7 @@ def main():
             boat.step()
 
             payload = boat.payload(
-                tick
+                time.time()   # real Unix timestamp — was: tick (integer)
             )
 
             payload[

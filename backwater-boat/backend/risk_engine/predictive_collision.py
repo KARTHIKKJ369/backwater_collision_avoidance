@@ -30,6 +30,23 @@ def predict_collision(
     speed_b: float = 0.0,
     reaction_time_sec: float = 4.0
 ) -> dict[str, float | str]:
+    """Compute the minimum future separation across paired trajectory points.
+
+    Parameters
+    ----------
+    trajectory_a / trajectory_b:
+        Lists of {"lat", "lon"} dicts from predict_future_positions().
+    speed_a / speed_b:
+        Current boat speeds in m/s.  Used to set the dynamic safety radius
+        (safety_radius = max(20 m, max_speed × reaction_time_sec)).
+        Previously defaulted to 0 which pinned the radius to 20 m; callers
+        should now pass real speeds so fast-moving boats get an appropriate
+        larger warning zone.
+    reaction_time_sec:
+        Seconds of reaction time assumed.  Expanded to 6–8 s in poor
+        visibility by predict_collision_from_history() (the weather-aware
+        wrapper that should be preferred when history is available).
+    """
     minimum_future_distance = float("inf")
     time_to_collision = 0
 

@@ -21,7 +21,19 @@ export default function Shell() {
   const groupedPredictions = useMemo(() => {
     const out: Record<string, [number, number, number][]> = {};
     if (!Array.isArray(data.predictions)) return out;
+
+    // The backend now returns only the latest batch via latest_predictions().
+    // As a client-side safety net we also deduplicate here: find the max
+    // timestamp per boat and skip any row from an older batch.  This prevents
+    // the "fan of lines" that appears when rows from multiple ticks are mixed.
+    const latestTs: Record<string, number> = {};
     for (const p of data.predictions) {
+      const ts = Number(p.timestamp ?? 0);
+      if (ts > (latestTs[p.boat_id] ?? 0)) latestTs[p.boat_id] = ts;
+    }
+    for (const p of data.predictions) {
+      const ts = Number(p.timestamp ?? 0);
+      if (ts < latestTs[p.boat_id]) continue; // stale batch — skip
       (out[p.boat_id] ||= []).push([p.pred_lat, p.pred_lon, p.confidence]);
     }
     return out;

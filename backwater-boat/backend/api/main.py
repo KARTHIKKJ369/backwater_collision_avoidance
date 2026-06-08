@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 import threading
 import time
 from typing import Any
@@ -21,10 +22,32 @@ from backend.weather.weather_client import get_weather_for_position, mock_weathe
 # ---------------------------------------------------------------------------
 
 def _step(s: dict) -> None:
-    """Advance boat position by one 1-second tick (flat-earth, short-range)."""
+    """Advance position and derive IMU channels for one 1-second tick.
+
+    Mirrors BoatState.step() in simulator/boat_sim.py so the ML model
+    receives the same 11-feature input it was trained on instead of zeroed
+    IMU values that degrade prediction quality (especially on turns and
+    deceleration events like BLIND_TURN and SUDDEN_STOP).
+    """
+    # IMU — derived from kinematic deltas (DT = 1 s)
+    prev_speed   = s.get("_prev_speed",   s["speed"])
+    prev_heading = s.get("_prev_heading", s["heading"])
+
+    s["ax"] = round(s["speed"] - prev_speed, 4)                         # forward accel
+    delta_h = (s["heading"] - prev_heading + 180) % 360 - 180
+    s["gz"] = round(math.radians(delta_h), 4)                           # yaw rate rad/s
+    s["ay"] = round(s["speed"] * s["gz"], 4)                            # centripetal m/s²
+    s["az"] = round(9.81 + random.gauss(0, 0.05), 4)                    # gravity + heave
+    s["gx"] = round(random.gauss(0, 0.02), 5)                           # wave roll
+    s["gy"] = round(random.gauss(0, 0.02), 5)                           # wave pitch
+
+    s["_prev_speed"]   = s["speed"]
+    s["_prev_heading"] = s["heading"]
+
+    # Advance position (flat-earth, valid for short ranges)
     rad = math.radians(s["heading"])
-    s["lat"] += s["speed"] * math.cos(rad) / 111_320
-    s["lon"] += s["speed"] * math.sin(rad) / (
+    s["lat"] += (s["speed"] * math.cos(rad)) / 111_320
+    s["lon"] += (s["speed"] * math.sin(rad)) / (
         111_320 * math.cos(math.radians(s["lat"]))
     )
 
@@ -113,14 +136,21 @@ def _scenario_loop(name: str, stop: threading.Event) -> None:
         for s in states:
             _step(s)
             payload: dict[str, Any] = {
-                "boat_id": s["boat_id"],
+                "boat_id":   s["boat_id"],
                 "timestamp": time.time(),
-                "lat": round(s["lat"], 7),
-                "lon": round(s["lon"], 7),
-                "speed": round(s["speed"], 2),
-                "heading": round(s["heading"] % 360, 2),
-                "obstacle": s.get("obstacle", 0),
-                "scenario": name,
+                "lat":       round(s["lat"], 7),
+                "lon":       round(s["lon"], 7),
+                "speed":     round(s["speed"], 2),
+                "heading":   round(s["heading"] % 360, 2),
+                "obstacle":  s.get("obstacle", 0),
+                "scenario":  name,
+                # IMU channels — computed by _step(), required for 11-feature ML input
+                "ax": s.get("ax", 0.0),
+                "ay": s.get("ay", 0.0),
+                "az": s.get("az", 9.81),
+                "gx": s.get("gx", 0.0),
+                "gy": s.get("gy", 0.0),
+                "gz": s.get("gz", 0.0),
             }
             publish(f"boats/{s['boat_id']}/sensor", payload)
         with _sim_lock:
@@ -200,7 +230,9 @@ def alerts(limit: int = Query(100, ge=1, le=500)) -> list[dict[str, Any]]:
 
 @app.get("/predictions")
 def predictions(limit: int = Query(100, ge=1, le=500)) -> list[dict[str, Any]]:
-    return db.fetch_all("prediction", limit)
+    # latest_predictions() returns only the most-recent batch per boat, not
+    # the last N rows across all ticks (which would cause the fan-of-lines bug).
+    return db.latest_predictions()
 
 
 @app.get("/recommendations")

@@ -94,7 +94,7 @@ def main() -> None:
                 _step(b)
                 payload = {
                     "boat_id":   b["boat_id"],
-                    "timestamp": tick,
+                    "timestamp": time.time(),   # real Unix time — was: tick (integer)
                     "lat":       round(b["lat"],  7),
                     "lon":       round(b["lon"],  7),
                     "speed":     round(b["speed"], 2),

@@ -81,6 +81,8 @@ def store_message(payload: dict[str, Any]) -> dict[str, Any]:
             risk_result["risk"],
             ttc_value,
             scenario,
+            speed_a=float(payload.get("speed", 0.0)),
+            speed_b=float(other_payload.get("speed", 0.0)),
         )
         collision = prediction_result.get("collision") if prediction_result else None
 

@@ -271,6 +271,32 @@ def latest_telemetry(limit: int = 50) -> list[dict[str, Any]]:
     return rows_to_dicts(rows)
 
 
+def latest_predictions() -> list[dict[str, Any]]:
+    """Return only the most-recent prediction batch per boat.
+
+    Each prediction run inserts FORECAST_STEPS rows all sharing the same
+    (boat_id, timestamp).  fetch_all() returns the N most-recent rows by
+    rowid, which mixes batches from multiple ticks and produces the fan of
+    lines on the map.  This query keeps only the rows whose timestamp equals
+    the MAX timestamp for each boat, giving a single clean trajectory.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT p.*
+        FROM prediction p
+        INNER JOIN (
+            SELECT boat_id, MAX(timestamp) AS max_ts
+            FROM prediction
+            GROUP BY boat_id
+        ) latest ON latest.boat_id = p.boat_id
+                 AND latest.max_ts  = p.timestamp
+        ORDER BY p.boat_id, p.rowid
+        """
+    ).fetchall()
+    return rows_to_dicts(rows)
+
+
 def fetch_by_scenario(table: str, scenario: str, limit: int = 10_000) -> list[dict[str, Any]]:
     allowed = {"telemetry", "prediction", "alerts", "recommendations"}
     if table not in allowed:
