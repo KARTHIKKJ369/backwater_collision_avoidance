@@ -31,29 +31,35 @@ def run_scenario(name: str, duration: int, interval: float) -> dict[str, float |
     client = connect_client()
     boats = make_boats(scenario)
 
-    for tick in range(duration):
-        update_scenario(boats, scenario, tick)
-        for boat in boats:
-            boat.step()
-            payload = boat.payload(time.time())  # real Unix time — was: tick (integer)
-            payload["scenario"] = name
-            client.publish(f"boats/{boat.boat_id}/sensor", json.dumps(payload), qos=0)
-        time.sleep(interval)
+    try:
+        for tick in range(duration):
+            update_scenario(boats, scenario, tick)
+            for boat in boats:
+                boat.step()
+                payload = boat.payload(time.time())  # real Unix time — was: tick (integer)
+                payload["scenario"] = name
+                client.publish(f"boats/{boat.boat_id}/sensor", json.dumps(payload), qos=0)
+            time.sleep(interval)
 
-    time.sleep(2)
-    evaluation = _get_json(f"/evaluation?scenario={name}")
-    metrics = _get_json("/metrics")
-    timeline = _get_json(f"/timeline?scenario={name}")
-    write_timeline(name, timeline if isinstance(timeline, list) else [])
-    return {
-        "scenario": name,
-        "alerts": metrics.get("alerts_total", 0),
-        "predictions": metrics.get("predictions_total", 0),
-        "collisions": metrics.get("collisions_predicted", 0),
-        "avg_risk": metrics.get("avg_risk", 0),
-        "latency": metrics.get("avg_prediction_latency_ms", 0),
-        "precision": evaluation.get("precision", 0),
-    }
+        time.sleep(2)
+        evaluation = _get_json(f"/evaluation?scenario={name}")
+        metrics = _get_json("/metrics")
+        timeline = _get_json(f"/timeline?scenario={name}")
+        write_timeline(name, timeline if isinstance(timeline, list) else [])
+        return {
+            "scenario": name,
+            "alerts": metrics.get("alerts_total", 0),
+            "predictions": metrics.get("predictions_total", 0),
+            "collisions": metrics.get("collisions_predicted", 0),
+            "avg_risk": metrics.get("avg_risk", 0),
+            "latency": metrics.get("avg_prediction_latency_ms", 0),
+            "precision": evaluation.get("precision", 0),
+        }
+    finally:
+        # Always disconnect cleanly so the old client's loop_start() background
+        # thread doesn't auto-reconnect and fight with the next scenario's client.
+        client.loop_stop()
+        client.disconnect()
 
 
 def write_results(rows: list[dict[str, float | int | str]]) -> None:

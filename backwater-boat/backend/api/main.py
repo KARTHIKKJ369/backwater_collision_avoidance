@@ -308,17 +308,37 @@ def run_scenario(name: str) -> dict[str, Any]:
     if name not in SCENARIOS:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Unknown scenario: {name}")
-    # Stop any running scenario
-    _sim_stop.set()
-    if _sim_thread and _sim_thread.is_alive():
-        _sim_thread.join(timeout=3)
-    _sim_stop = threading.Event()
+
+    # --- Thread-safe swap -------------------------------------------------------
+    # FastAPI runs sync endpoints in a thread pool, so two rapid requests can
+    # execute concurrently.  Without the lock, both could pass the join() and
+    # each create a new thread — leaving two _scenario_loop threads alive at
+    # once and publishing sensor data simultaneously (the "both run turn by turn"
+    # symptom).  We capture old_stop/old_thread under the lock so that only ONE
+    # new thread is ever registered at a time, then do the slow join() outside
+    # the lock to avoid blocking other requests.
     with _sim_lock:
+        old_stop: threading.Event = _sim_stop
+        old_thread: threading.Thread | None = _sim_thread
+
+        _sim_stop = threading.Event()
+        new_stop = _sim_stop
+
         _sim_status.update({"running": True, "scenario": name, "tick": 0})
-    _sim_thread = threading.Thread(
-        target=_scenario_loop, args=(name, _sim_stop), daemon=True, name=f"sim-{name}"
-    )
-    _sim_thread.start()
+
+        new_thread = threading.Thread(
+            target=_scenario_loop, args=(name, new_stop), daemon=True, name=f"sim-{name}"
+        )
+        _sim_thread = new_thread
+    # ---------------------------------------------------------------------------
+
+    # Signal the old scenario to stop and wait for it to exit cleanly (outside
+    # the lock so stop/status endpoints aren't blocked during the join).
+    old_stop.set()
+    if old_thread and old_thread.is_alive():
+        old_thread.join(timeout=3)
+
+    new_thread.start()
     return {"started": True, "scenario": name}
 
 

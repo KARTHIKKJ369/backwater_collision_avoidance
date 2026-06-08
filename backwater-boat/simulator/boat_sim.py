@@ -208,9 +208,16 @@ def update_scenario(
 
 def connect_client():
 
+    # Use a unique client_id on every call.  paho's default behaviour is to
+    # auto-reconnect when disconnected; if two clients share the same id the
+    # MQTT broker disconnects the old one, its loop_start() thread reconnects,
+    # the broker then kicks the new one, and they fight alternately — exactly
+    # the "both scenarios running turn by turn each second" symptom.
+    unique_id = f"boat-simulator-{int(time.time() * 1000)}"
+
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
-        client_id="boat-simulator",
+        client_id=unique_id,
     )
 
     client.connect(
