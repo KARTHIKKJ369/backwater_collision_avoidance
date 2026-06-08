@@ -112,11 +112,15 @@ def build_windows(grouped: dict, norm: dict) -> tuple[np.ndarray, np.ndarray]:
             continue
         for i in range(n - WINDOW_SIZE - FORECAST_STEPS + 1):
             X.append(enc[i : i + WINDOW_SIZE])
-            # target = normalised lat/lon only (FORECAST_STEPS pairs → 2N values)
+            # target = DELTA from last window position (normalised)
+            # This makes training translation-invariant — model learns dynamics
+            # not geography, so deployment lat/lon mismatch no longer OOD.
+            origin_lat = arr[i + WINDOW_SIZE - 1, 0]
+            origin_lon = arr[i + WINDOW_SIZE - 1, 1]
             tgt_raw = arr[i + WINDOW_SIZE : i + WINDOW_SIZE + FORECAST_STEPS, :2]
-            tgt_lat = (tgt_raw[:, 0] - lat_mu) / lat_sd
-            tgt_lon = (tgt_raw[:, 1] - lon_mu) / lon_sd
-            Y.append(np.stack([tgt_lat, tgt_lon], axis=1).reshape(-1))
+            tgt_dlat = (tgt_raw[:, 0] - origin_lat) / lat_sd
+            tgt_dlon = (tgt_raw[:, 1] - origin_lon) / lon_sd
+            Y.append(np.stack([tgt_dlat, tgt_dlon], axis=1).reshape(-1))
     return np.array(X, dtype=np.float32), np.array(Y, dtype=np.float32)
 
 
@@ -128,12 +132,11 @@ INPUT_FEATURES = 11  # lat_n, lon_n, spd_n, sin_h, cos_h, ax_n, ay_n, az_n, gx_n
 
 def build_model() -> tf.keras.Model:
     model = Sequential([
-        LSTM(128, return_sequences=True, unroll=True,
+        LSTM(128, return_sequences=True,
              input_shape=(WINDOW_SIZE, INPUT_FEATURES)),
         Dropout(0.2),
-        LSTM(64, unroll=True),
+        LSTM(64),
         Dropout(0.2),
-        
         Dense(FORECAST_STEPS * 2),
     ])
     model.compile(optimizer=tf.keras.optimizers.Adam(1e-3), loss="mse",
@@ -146,17 +149,23 @@ def build_model() -> tf.keras.Model:
 # ------------------------------------------------------------------
 
 def convert_tflite(model: tf.keras.Model, out_path: Path) -> None:
-    conv = tf.lite.TFLiteConverter.from_keras_model(model)
+    # Rebuild with unroll=True for TFLite compatibility, copy weights
+    tflite_model_def = Sequential([
+        LSTM(128, return_sequences=True, unroll=True,
+             input_shape=(WINDOW_SIZE, INPUT_FEATURES)),
+        Dropout(0.2),
+        LSTM(64, unroll=True),
+        Dropout(0.2),
+        Dense(FORECAST_STEPS * 2),
+    ])
+    tflite_model_def.set_weights(model.get_weights())
+
+    conv = tf.lite.TFLiteConverter.from_keras_model(tflite_model_def)
     conv.optimizations = [tf.lite.Optimize.DEFAULT]
-    
-    # Force conversion to purely standard TFLite built-in operations
     conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-    
-    tflite_model = conv.convert()
-    out_path.write_bytes(tflite_model)
-    
-    kb = len(tflite_model) / 1024
-    print(f"  Saved TFLite model  → {out_path}  ({kb:.1f} KB)")
+    tflite_bytes = conv.convert()
+    out_path.write_bytes(tflite_bytes)
+    print(f"  Saved TFLite model  → {out_path}  ({len(tflite_bytes)/1024:.1f} KB)")
 
 
 # ------------------------------------------------------------------

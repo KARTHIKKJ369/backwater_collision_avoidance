@@ -45,12 +45,13 @@ def _encode_row(row: dict[str, Any], norm: dict[str, float]) -> list[float]:
             ax_n, ay_n, az_n, gx_n, gy_n, gz_n]
 
 
-def _decode_output(raw: np.ndarray, norm: dict[str, float]) -> list[dict[str, float]]:
-    """raw shape: (FORECAST_STEPS, 2) — normalised [lat, lon] pairs."""
+def _decode_output(raw: np.ndarray, norm: dict[str, float],
+                   origin_lat: float, origin_lon: float) -> list[dict[str, float]]:
+    """raw shape: (FORECAST_STEPS, 2) — normalised [dlat, dlon] deltas from last window pos."""
     points = []
-    for lat_n, lon_n in raw:
-        lat = float(lat_n) * norm["lat_sd"] + norm["lat_mu"]
-        lon = float(lon_n) * norm["lon_sd"] + norm["lon_mu"]
+    for dlat_n, dlon_n in raw:
+        lat = origin_lat + float(dlat_n) * norm["lat_sd"]
+        lon = origin_lon + float(dlon_n) * norm["lon_sd"]
         points.append({"lat": round(lat, 7), "lon": round(lon, 7)})
     return points
 
@@ -165,7 +166,9 @@ def _dead_reckon(history: list[dict[str, Any]],
 # ------------------------------------------------------------------
 
 def _predict_tflite(features: np.ndarray,
-                    norm: dict[str, float]) -> list[dict[str, float]] | None:
+                    norm: dict[str, float],
+                    origin_lat: float,
+                    origin_lon: float) -> list[dict[str, float]] | None:
     try:
         # Resolution order for the TFLite interpreter across environments:
         #   tflite-runtime      — lightweight, Python ≤3.9, Pi/container target
@@ -186,7 +189,7 @@ def _predict_tflite(features: np.ndarray,
         interp.set_tensor(inp_idx, features)
         interp.invoke()
         raw = interp.get_tensor(out_idx).reshape(FORECAST_STEPS, 2)
-        return _with_confidence(_decode_output(raw, norm))
+        return _with_confidence(_decode_output(raw, norm, origin_lat, origin_lon))
     except Exception as exc:
         print(f"[INFERENCE] tflite failed: {exc}", flush=True)
         return None
@@ -197,12 +200,14 @@ def _predict_tflite(features: np.ndarray,
 # ------------------------------------------------------------------
 
 def _predict_keras(features: np.ndarray,
-                   norm: dict[str, float]) -> list[dict[str, float]] | None:
+                   norm: dict[str, float],
+                   origin_lat: float,
+                   origin_lon: float) -> list[dict[str, float]] | None:
     try:
         from tensorflow.keras.models import load_model
         model = load_model(H5_PATH)
         raw = model.predict(features, verbose=0).reshape(FORECAST_STEPS, 2)
-        return _with_confidence(_decode_output(raw, norm))
+        return _with_confidence(_decode_output(raw, norm, origin_lat, origin_lon))
     except Exception:
         return None
 
@@ -240,7 +245,7 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
 
     # Try TFLite first (fast, Pi-friendly)
     if TFLITE_PATH.exists():
-        result = _predict_tflite(features, norm)
+        result = _predict_tflite(features, norm, origin_lat, origin_lon)
         if result:
             if _sanity_check(result, origin_lat, origin_lon, speed_ms):
                 print("[INFERENCE] tflite", flush=True)
@@ -253,7 +258,7 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
 
     # Try Keras (dev machines with full TF installed)
     if H5_PATH.exists():
-        result = _predict_keras(features, norm)
+        result = _predict_keras(features, norm, origin_lat, origin_lon)
         if result:
             if _sanity_check(result, origin_lat, origin_lon, speed_ms):
                 print("[INFERENCE] keras", flush=True)

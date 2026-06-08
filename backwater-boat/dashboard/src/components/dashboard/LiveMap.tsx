@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Circle, Popup, Tooltip } fro
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
 import { Layers } from "lucide-react";
-import { groupPath, haversine, riskClass, type Boat, type RiskLevel } from "@/lib/maritime";
+import { haversine, riskClass, type Boat, type RiskLevel } from "@/lib/maritime";
 
 const BOAT_COLORS = ["#06b6d4", "#a78bfa", "#fbbf24", "#34d399"];
 
@@ -33,7 +33,6 @@ type Props = {
 
 export default function LiveMap({ center, latest, predictions, telemetry }: Props) {
   const [showPreds, setShowPreds] = useState(true);
-  const trails = useMemo(() => groupPath(telemetry, "lat", "lon"), [telemetry]);
   const safe = Array.isArray(latest) ? latest : [];
 
   const collisionPairs = useMemo(() => {
@@ -60,13 +59,7 @@ export default function LiveMap({ center, latest, predictions, telemetry }: Prop
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
 
-        {safe.map((b, idx) => {
-          const trail = trails[b.boat_id] || [];
-          const color = BOAT_COLORS[idx % BOAT_COLORS.length];
-          return trail.length > 1 ? (
-            <Polyline key={`trail-${b.boat_id}`} positions={trail.slice(-30)} pathOptions={{ color, weight: 2, opacity: 0.3 }} />
-          ) : null;
-        })}
+
 
         {showPreds &&
           safe.map((b, idx) => {

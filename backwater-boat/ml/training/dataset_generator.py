@@ -147,7 +147,7 @@ def _compute_imu(
 
 def _scenario_straight(points: int) -> list[dict]:
     """Constant speed, constant heading — baseline cruise."""
-    heading = random.uniform(30, 60)
+    heading = random.uniform(0, 350)
     speed   = random.uniform(3.5, 5.5)
     rows = []
     prev_speed, prev_heading = speed, heading
@@ -222,7 +222,7 @@ def _scenario_blind_turn(points: int) -> list[dict]:
     Sinusoidal yaw rate — the key BLIND_TURN signature.
     gz and ay are large and oscillatory.  Speed constant.
     """
-    heading = random.uniform(10, 30)
+    heading = random.uniform(0, 350)
     speed   = random.uniform(2.5, 4.0)
     rows = []
     prev_speed = speed
@@ -319,7 +319,7 @@ def main() -> None:
     rows: list[dict] = []
     for scenario in _GENERATORS:
         prefix = scenario[:2].upper()
-        for sample in range(25):
+        for sample in range(50):
             rows.extend(
                 generate_scenario(scenario, f"{prefix}{sample:02d}")
             )
