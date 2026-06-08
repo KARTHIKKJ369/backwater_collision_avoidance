@@ -89,6 +89,57 @@ def _with_confidence(points: list[dict[str, float]]) -> list[dict[str, float]]:
 
 
 # ------------------------------------------------------------------
+# Physical sanity-check constants
+# ------------------------------------------------------------------
+
+_DT_SECONDS    = 1.0   # seconds per forecast step — must match simulator cadence
+_SANITY_FACTOR = 2.5   # allow up to 2.5× the kinematic maximum displacement
+_MIN_FLOOR_M   = 50.0  # minimum allowed radius (metres) for stationary / slow boats
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in metres between two WGS-84 points."""
+    R = 6_371_000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi  = math.radians(lat2 - lat1)
+    dlam  = math.radians(lon2 - lon1)
+    a = (math.sin(dphi / 2) ** 2
+         + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
+    return R * 2 * math.asin(math.sqrt(a))
+
+
+def _sanity_check(points: list[dict[str, float]],
+                  origin_lat: float,
+                  origin_lon: float,
+                  speed_ms: float) -> bool:
+    """Return True only when every predicted point sits within the kinematic envelope.
+
+    Root cause addressed:
+        The LSTM model outputs normalised absolute lat/lon.  With ``lat_sd ≈ 0.0021``
+        a poorly-converged model can emit values only ±5σ from the training mean yet
+        decode to positions 1–2 km from the actual boat — while ``_decode_output``
+        silently magnifies the error.  This guard catches those out-of-distribution
+        outputs *after* decoding and before they reach the risk engine.
+
+    For forecast step *i* (1-indexed) the maximum physically plausible displacement
+    from the last known position is::
+
+        max_dist_m = max(speed_ms × i × _DT_SECONDS × _SANITY_FACTOR, _MIN_FLOOR_M)
+
+    The floor ensures the check is not overly aggressive for stationary or very
+    slow boats where numerical noise in the model output would otherwise always
+    fail at the first step.
+    """
+    for i, pt in enumerate(points, start=1):
+        kinematic_max = speed_ms * i * _DT_SECONDS * _SANITY_FACTOR
+        threshold_m   = max(kinematic_max, _MIN_FLOOR_M)
+        dist_m = _haversine_m(origin_lat, origin_lon, pt["lat"], pt["lon"])
+        if dist_m > threshold_m:
+            return False
+    return True
+
+
+# ------------------------------------------------------------------
 # Dead-reckoning fallback  (unchanged from original)
 # ------------------------------------------------------------------
 
@@ -181,19 +232,37 @@ def predict_future_positions(history: list[dict[str, Any]]) -> list[dict[str, fl
         dtype=np.float32,
     ).reshape(1, WINDOW_SIZE, 11)  # 11 features: kin(5) + imu(6)
 
+    # Anchor for the physical sanity check — last observed position / speed.
+    latest     = history[-1]
+    origin_lat = float(latest["lat"])
+    origin_lon = float(latest["lon"])
+    speed_ms   = float(latest["speed"])
+
     # Try TFLite first (fast, Pi-friendly)
     if TFLITE_PATH.exists():
         result = _predict_tflite(features, norm)
         if result:
-            print("[INFERENCE] tflite", flush=True)
-            return result
+            if _sanity_check(result, origin_lat, origin_lon, speed_ms):
+                print("[INFERENCE] tflite", flush=True)
+                return result
+            print(
+                "[INFERENCE] tflite output failed sanity check "
+                f"(speed={speed_ms:.2f} m/s) — falling back to dead-reckoning",
+                flush=True,
+            )
 
     # Try Keras (dev machines with full TF installed)
     if H5_PATH.exists():
         result = _predict_keras(features, norm)
         if result:
-            print("[INFERENCE] keras", flush=True)
-            return result
+            if _sanity_check(result, origin_lat, origin_lon, speed_ms):
+                print("[INFERENCE] keras", flush=True)
+                return result
+            print(
+                "[INFERENCE] keras output failed sanity check "
+                f"(speed={speed_ms:.2f} m/s) — falling back to dead-reckoning",
+                flush=True,
+            )
 
     print("[INFERENCE] dead-reckoning (no model loaded)", flush=True)
     return _dead_reckon(history)

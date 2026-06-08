@@ -7,11 +7,22 @@ Targeted tests for the three bug fixes:
 """
 from __future__ import annotations
 
+import math
 import unittest
 
 from backend.predict_controller import should_run_prediction
 from backend.risk_engine.alerts import DANGER, SAFE, WARNING, AlertManager
 from backend.risk_engine.predictive_collision import predict_collision
+from ml.inference.predict import (
+    FORECAST_STEPS,
+    _haversine_m,
+    _sanity_check,
+    _dead_reckon,
+    predict_future_positions,
+    _MIN_FLOOR_M,
+    _SANITY_FACTOR,
+    _DT_SECONDS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +235,197 @@ class PredictCollisionBoundaryTests(unittest.TestCase):
         result = predict_collision([], [])
         self.assertEqual(result["alert_state"], SAFE)
         self.assertEqual(result["collision_probability"], 0.0)
+
+
+
+# ---------------------------------------------------------------------------
+# 4. Physical sanity-check helpers (_haversine_m, _sanity_check)
+# ---------------------------------------------------------------------------
+
+# Fixed point in the training region (Alappuzha backwaters)
+_BASE_LAT = 9.592
+_BASE_LON = 76.525
+
+
+def _shift_lat(lat: float, metres: float) -> float:
+    """Return latitude displaced north by *metres*."""
+    return lat + metres / 111_320.0
+
+
+def _shift_lon(lon: float, lat: float, metres: float) -> float:
+    """Return longitude displaced east by *metres* at a given latitude."""
+    return lon + metres / (111_320.0 * math.cos(math.radians(lat)))
+
+
+def _make_points(origin_lat: float, origin_lon: float,
+                 displacement_m: float, n: int) -> list[dict]:
+    """
+    Build *n* forecast points, each *displacement_m* metres north of the origin.
+    All steps land at the same location so the step-1 kinematic budget is the
+    binding constraint.
+    """
+    lat = _shift_lat(origin_lat, displacement_m)
+    return [{"lat": lat, "lon": origin_lon, "confidence": 0.9}] * n
+
+
+class HaversineTests(unittest.TestCase):
+    """_haversine_m returns correct metric distances."""
+
+    def test_zero_distance(self) -> None:
+        self.assertEqual(_haversine_m(_BASE_LAT, _BASE_LON, _BASE_LAT, _BASE_LON), 0.0)
+
+    def test_100m_north(self) -> None:
+        lat2 = _shift_lat(_BASE_LAT, 100.0)
+        self.assertAlmostEqual(_haversine_m(_BASE_LAT, _BASE_LON, lat2, _BASE_LON), 100.0, delta=0.5)
+
+    def test_500m_east(self) -> None:
+        lon2 = _shift_lon(_BASE_LON, _BASE_LAT, 500.0)
+        self.assertAlmostEqual(_haversine_m(_BASE_LAT, _BASE_LON, _BASE_LAT, lon2), 500.0, delta=2.0)
+
+    def test_symmetry(self) -> None:
+        lat2 = _shift_lat(_BASE_LAT, 200.0)
+        d1 = _haversine_m(_BASE_LAT, _BASE_LON, lat2, _BASE_LON)
+        d2 = _haversine_m(lat2, _BASE_LON, _BASE_LAT, _BASE_LON)
+        self.assertAlmostEqual(d1, d2, places=6)
+
+
+class SanityCheckUnitTests(unittest.TestCase):
+    """_sanity_check accepts good trajectories and rejects OOD ones."""
+
+    # --- passes ---
+
+    def test_accepts_points_within_kinematic_budget(self) -> None:
+        # speed 5 m/s, step-1 budget = 5 × 1 × 2.5 = 12.5 m → floor 50 m applies.
+        # 30 m is within the 50 m floor.
+        pts = _make_points(_BASE_LAT, _BASE_LON, 30.0, FORECAST_STEPS)
+        self.assertTrue(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=5.0))
+
+    def test_accepts_stationary_boat_within_floor(self) -> None:
+        # Speed=0 → all budgets collapse to _MIN_FLOOR_M; 30 m must still pass.
+        pts = _make_points(_BASE_LAT, _BASE_LON, 30.0, FORECAST_STEPS)
+        self.assertTrue(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=0.0))
+
+    def test_accepts_origin_itself(self) -> None:
+        pts = [{"lat": _BASE_LAT, "lon": _BASE_LON, "confidence": 1.0}] * FORECAST_STEPS
+        self.assertTrue(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=0.0))
+
+    # --- rejects ---
+
+    def test_rejects_1km_displacement_at_low_speed(self) -> None:
+        # 1 km at step-1, speed 2 m/s: budget = max(2×1×2.5, 50) = 50 m → reject.
+        pts = _make_points(_BASE_LAT, _BASE_LON, 1_000.0, FORECAST_STEPS)
+        self.assertFalse(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=2.0))
+
+    def test_rejects_ood_5sigma_displacement(self) -> None:
+        # 5σ × lat_sd ≈ 1.05 km — the exact failure mode described in the diagnosis.
+        lat_sd = 0.0021
+        displaced_lat = _BASE_LAT + 5 * lat_sd
+        pts = [{"lat": displaced_lat, "lon": _BASE_LON, "confidence": 0.5}] * FORECAST_STEPS
+        self.assertFalse(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=3.0))
+
+    def test_rejects_points_beyond_floor_for_stationary_boat(self) -> None:
+        pts = _make_points(_BASE_LAT, _BASE_LON, 200.0, FORECAST_STEPS)
+        self.assertFalse(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=0.0))
+
+    def test_step1_budget_is_binding_constraint(self) -> None:
+        # 100 m < step-15 budget (187.5 m) but > step-1 floor (50 m) → reject.
+        pts = _make_points(_BASE_LAT, _BASE_LON, 100.0, FORECAST_STEPS)
+        self.assertFalse(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=5.0))
+
+    def test_exactly_inside_floor_passes(self) -> None:
+        pts = _make_points(_BASE_LAT, _BASE_LON, _MIN_FLOOR_M - 0.1, FORECAST_STEPS)
+        self.assertTrue(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=0.0))
+
+    def test_budget_grows_with_speed(self) -> None:
+        # 200 m at step 1: budget = max(20×1×2.5, 50) = 50 m → still reject.
+        # But at step 15: budget = 20×15×2.5 = 750 m → 200 m would pass if checked alone.
+        # The per-step check must catch it at step 1.
+        pts = _make_points(_BASE_LAT, _BASE_LON, 200.0, 1)
+        self.assertFalse(_sanity_check(pts, _BASE_LAT, _BASE_LON, speed_ms=20.0))
+
+
+# ---------------------------------------------------------------------------
+# 5. Integration: predict_future_positions falls back on OOD model output
+# ---------------------------------------------------------------------------
+
+_BASE_HISTORY: list[dict] = [
+    {
+        "lat":     _BASE_LAT + i * 0.000009,   # ~1 m north each step
+        "lon":     _BASE_LON,
+        "speed":   2.0,
+        "heading": 0.0,
+        "ax": 0.0, "ay": 0.0, "az": 9.81,
+        "gx": 0.0, "gy": 0.0, "gz": 0.0,
+    }
+    for i in range(10)   # WINDOW_SIZE = 10
+]
+
+
+class SanityCheckIntegrationTests(unittest.TestCase):
+    """predict_future_positions uses dead-reckoning when the model returns OOD output."""
+
+    def _ood_points(self) -> list[dict]:
+        """1 km north — impossible for speed=2 m/s."""
+        lat_ood = _shift_lat(_BASE_LAT, 1_000.0)
+        return [{"lat": lat_ood, "lon": _BASE_LON, "confidence": 0.5}] * FORECAST_STEPS
+
+    def test_ood_tflite_falls_back_to_dead_reckoning(self) -> None:
+        import ml.inference.predict as pred_mod
+
+        ood = self._ood_points()
+        orig_tflite = pred_mod._predict_tflite
+        orig_keras  = pred_mod._predict_keras
+        try:
+            pred_mod._predict_tflite = lambda *_a, **_kw: ood
+            pred_mod._predict_keras  = lambda *_a, **_kw: None
+            result = pred_mod.predict_future_positions(_BASE_HISTORY)
+        finally:
+            pred_mod._predict_tflite = orig_tflite
+            pred_mod._predict_keras  = orig_keras
+
+        for pt in result:
+            dist = _haversine_m(_BASE_LAT, _BASE_LON, pt["lat"], pt["lon"])
+            self.assertLess(
+                dist, 200.0,
+                msg=f"OOD output not suppressed — got {pt!r} ({dist:.0f} m away)",
+            )
+
+    def test_valid_tflite_output_is_returned_as_is(self) -> None:
+        import ml.inference.predict as pred_mod
+
+        lat_close = _shift_lat(_BASE_LAT, 10.0)   # 10 m north — well within floor
+        valid = [{"lat": lat_close, "lon": _BASE_LON, "confidence": 0.9}] * FORECAST_STEPS
+
+        orig_tflite = pred_mod._predict_tflite
+        orig_keras  = pred_mod._predict_keras
+        try:
+            pred_mod._predict_tflite = lambda *_a, **_kw: valid
+            pred_mod._predict_keras  = lambda *_a, **_kw: None
+            result = pred_mod.predict_future_positions(_BASE_HISTORY)
+        finally:
+            pred_mod._predict_tflite = orig_tflite
+            pred_mod._predict_keras  = orig_keras
+
+        self.assertEqual(result, valid)
+
+    def test_ood_keras_also_falls_back(self) -> None:
+        """The sanity check must also gate the Keras path, not only TFLite."""
+        import ml.inference.predict as pred_mod
+
+        ood = self._ood_points()
+        orig_tflite = pred_mod._predict_tflite
+        orig_keras  = pred_mod._predict_keras
+        try:
+            pred_mod._predict_tflite = lambda *_a, **_kw: None   # TFLite unavailable
+            pred_mod._predict_keras  = lambda *_a, **_kw: ood
+            result = pred_mod.predict_future_positions(_BASE_HISTORY)
+        finally:
+            pred_mod._predict_tflite = orig_tflite
+            pred_mod._predict_keras  = orig_keras
+
+        for pt in result:
+            dist = _haversine_m(_BASE_LAT, _BASE_LON, pt["lat"], pt["lon"])
+            self.assertLess(dist, 200.0)
 
 
 if __name__ == "__main__":
