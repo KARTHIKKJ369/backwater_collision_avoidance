@@ -1,11 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, Circle, Tooltip } from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
 import {
   averageConfidence,
   futureSeparation,
-  groupPath,
   haversine,
   recommendationTone,
   riskClass,
@@ -17,16 +16,21 @@ import {
 
 const BOAT_COLORS = ["#06b6d4", "#a78bfa", "#fbbf24", "#34d399"];
 
+const iconCache = new Map<string, L.DivIcon>();
 function makeIcon(heading: number, level: RiskLevel) {
+  const key = `${heading}|${level}`;
+  const hit = iconCache.get(key);
+  if (hit) return hit;
   const colors: Record<RiskLevel, string> = { safe: "#10b981", warning: "#f59e0b", danger: "#ef4444" };
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 32 32" style="transform:rotate(${heading}deg);"><polygon points="16,2 26,28 16,22 6,28" fill="${colors[level]}" stroke="#09090b" stroke-width="2" stroke-linejoin="miter"/></svg>`;
-  return new L.DivIcon({ className: "", html: svg, iconSize: [28, 28], iconAnchor: [14, 14] });
+  const icon = new L.DivIcon({ className: "", html: svg, iconSize: [28, 28], iconAnchor: [14, 14] });
+  iconCache.set(key, icon);
+  return icon;
 }
 
 type Props = {
   center: [number, number];
   latest: Boat[];
-  telemetry: Boat[];
   groupedPredictions: Record<string, [number, number, number][]>;
   predictions: Prediction[];
   recommendations: Recommendation[];
@@ -35,14 +39,12 @@ type Props = {
 export default function Collision({
   center,
   latest,
-  telemetry,
   groupedPredictions,
   predictions,
   recommendations,
 }: Props) {
   const safe = Array.isArray(latest) ? latest : [];
   const [boatA, boatB] = safe;
-  const actualPaths = useMemo(() => groupPath(telemetry, "lat", "lon"), [telemetry]);
 
   const distance = useMemo(
     () => (boatA && boatB ? haversine(boatA.lat, boatA.lon, boatB.lat, boatB.lon) : 0),
@@ -78,7 +80,18 @@ export default function Collision({
   const [ackState, setAckState] = useState<"idle" | "pending" | "done">("idle");
   const confidence = averageConfidence(predictions);
 
-  const risk = boatA && boatB ? Math.max(Number(boatA.risk || 0), Number(boatB.risk || 0)) : 0;
+  // Collision probability: weighted combination of current distance, closing speed, and
+  // predicted minimum separation — all normalised to [0,1] then clamped.
+  const risk = useMemo(() => {
+    if (!boatA || !boatB) return 0;
+    // Distance factor: 1.0 at 0 m, 0.0 at 300 m
+    const distFactor = distance > 0 ? Math.max(0, 1 - distance / 300) : 0;
+    // Closing-speed factor: saturates at 5 m/s; 0 when diverging
+    const csFactor = closingSpeed > 0 ? Math.min(1, closingSpeed / 5) : 0;
+    // Predicted-separation factor: 1.0 at 0 m, 0.0 at 200 m
+    const futFactor = futureDist != null ? Math.max(0, 1 - futureDist / 200) : distFactor;
+    return Math.min(1, 0.35 * distFactor + 0.30 * csFactor + 0.35 * futFactor);
+  }, [boatA, boatB, distance, closingSpeed, futureDist]);
   const level = riskClass(risk);
   const latestRec = Array.isArray(recommendations) ? recommendations[0] : null;
   const action = latestRec?.action || "MAINTAIN COURSE";
@@ -106,18 +119,15 @@ export default function Collision({
             attribution="&copy; CartoDB"
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
-          {Object.entries(actualPaths).map(([id, pts], idx) => (
-            <Polyline
-              key={`a-${id}`}
-              positions={pts.slice(-30)}
-              pathOptions={{ color: BOAT_COLORS[idx % BOAT_COLORS.length], weight: 2.5, opacity: 0.4 }}
-            />
-          ))}
+
           {Object.entries(groupedPredictions).map(([id, pts], idx) => {
             if (pts.length < 2) return null;
             const color = BOAT_COLORS[idx % BOAT_COLORS.length];
             const solid = pts.slice(0, 5);
             const uncertain = pts.slice(4);
+            const end = pts[pts.length - 1];
+            const avgConf = pts.reduce((s, p) => s + (p[2] || 0.5), 0) / pts.length;
+            const radius = Math.max(8, 30 * (1 - avgConf));
             return (
               <Fragment key={`p-${id}`}>
                 <Polyline positions={solid.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]} pathOptions={{ color, weight: 3, opacity: 0.9 }} />
@@ -125,6 +135,21 @@ export default function Collision({
                   positions={uncertain.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]}
                   pathOptions={{ color, weight: 2, opacity: 0.4, dashArray: "5 5" }}
                 />
+                {end && (
+                  <Circle
+                    center={[end[0], end[1]]}
+                    radius={radius}
+                    pathOptions={{ color, weight: 1.5, fillColor: color, fillOpacity: 0.12, dashArray: "2 4" }}
+                  >
+                    <Tooltip direction="top" offset={[0, -4]} opacity={0.95}>
+                      <span style={{ fontSize: 11 }}>
+                        {id} · predicted zone
+                        <br />
+                        confidence {(avgConf * 100).toFixed(0)}%
+                      </span>
+                    </Tooltip>
+                  </Circle>
+                )}
               </Fragment>
             );
           })}
@@ -295,8 +320,8 @@ function VesselCard({ boat, color, label }: { boat?: Boat; color: string; label:
         <span className="text-[10px] font-mono text-zinc-400 truncate">{boat?.boat_id || `Boat ${label}`}</span>
       </div>
       <div className="font-mono text-[11px] text-zinc-300 leading-relaxed">
-        <div>{boat ? `${Number(boat.speed).toFixed(1)} m/s` : "—"}</div>
-        <div className="text-zinc-500">{boat ? `heading ${Number(boat.heading).toFixed(0)}°` : "—"}</div>
+        <div>{boat ? `${Number(boat.speed || 0).toFixed(1)} m/s` : "—"}</div>
+        <div className="text-zinc-500">{boat ? `heading ${Number(boat.heading || 0).toFixed(0)}°` : "—"}</div>
       </div>
     </div>
   );
