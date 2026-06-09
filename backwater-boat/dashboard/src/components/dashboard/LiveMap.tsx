@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Circle, Popup, Tooltip } fro
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
 import { Layers } from "lucide-react";
-import { haversine, riskClass, type Boat, type RiskLevel } from "@/lib/maritime";
+import { groupPath, haversine, riskClass, type Boat, type RiskLevel } from "@/lib/maritime";
 
 const BOAT_COLORS = ["#06b6d4", "#a78bfa", "#fbbf24", "#34d399"];
 
@@ -35,6 +35,20 @@ export default function LiveMap({ center, latest, predictions, telemetry }: Prop
   const [showPreds, setShowPreds] = useState(true);
   const safe = Array.isArray(latest) ? latest : [];
 
+  // Map boat_id → colour so trails and prediction lines share the same colour
+  const boatColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    safe.forEach((b, idx) => { map[b.boat_id] = BOAT_COLORS[idx % BOAT_COLORS.length]; });
+    return map;
+  }, [safe]);
+
+  // Historical tracks: telemetry arrives newest-first; reverse so the polyline
+  // runs oldest → newest (tail → current position).
+  const boatPaths = useMemo(
+    () => groupPath([...telemetry].reverse(), "lat", "lon"),
+    [telemetry],
+  );
+
   const collisionPairs = useMemo(() => {
     const pairs: { a: Boat; b: Boat; dist: number }[] = [];
     for (let i = 0; i < safe.length; i++) {
@@ -60,6 +74,19 @@ export default function LiveMap({ center, latest, predictions, telemetry }: Prop
         />
 
 
+
+        {/* Historical tracks — faint trail showing where each boat has been */}
+        {Object.entries(boatPaths).map(([id, pts]) => {
+          if (pts.length < 2) return null;
+          const color = boatColorMap[id] ?? "#94a3b8";
+          return (
+            <Polyline
+              key={`trail-${id}`}
+              positions={pts.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]}
+              pathOptions={{ color, weight: 1.5, opacity: 0.35, dashArray: "3 5" }}
+            />
+          );
+        })}
 
         {showPreds &&
           safe.map((b, idx) => {

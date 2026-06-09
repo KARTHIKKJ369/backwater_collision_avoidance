@@ -5,6 +5,7 @@ import L from "leaflet";
 import {
   averageConfidence,
   futureSeparation,
+  groupPath,
   haversine,
   recommendationTone,
   riskClass,
@@ -31,6 +32,7 @@ function makeIcon(heading: number, level: RiskLevel) {
 type Props = {
   center: [number, number];
   latest: Boat[];
+  telemetry: Boat[];
   groupedPredictions: Record<string, [number, number, number][]>;
   predictions: Prediction[];
   recommendations: Recommendation[];
@@ -39,12 +41,26 @@ type Props = {
 export default function Collision({
   center,
   latest,
+  telemetry,
   groupedPredictions,
   predictions,
   recommendations,
 }: Props) {
   const safe = Array.isArray(latest) ? latest : [];
   const [boatA, boatB] = safe;
+
+  // Colour map: matches the BOAT_COLORS order in the prediction lines
+  const boatColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    safe.forEach((b, idx) => { map[b.boat_id] = BOAT_COLORS[idx % BOAT_COLORS.length]; });
+    return map;
+  }, [safe]);
+
+  // Historical tracks (telemetry is newest-first; reverse for chronological order)
+  const boatPaths = useMemo(
+    () => groupPath([...telemetry].reverse(), "lat", "lon"),
+    [telemetry],
+  );
 
   const distance = useMemo(
     () => (boatA && boatB ? haversine(boatA.lat, boatA.lon, boatB.lat, boatB.lon) : 0),
@@ -119,6 +135,19 @@ export default function Collision({
             attribution="&copy; CartoDB"
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
+
+          {/* Historical tracks */}
+          {Object.entries(boatPaths).map(([id, pts]) => {
+            if (pts.length < 2) return null;
+            const color = boatColorMap[id] ?? "#94a3b8";
+            return (
+              <Polyline
+                key={`trail-${id}`}
+                positions={pts.map((p) => [p[0], p[1]] as LatLngExpression) as LatLngExpression[]}
+                pathOptions={{ color, weight: 1.5, opacity: 0.35, dashArray: "3 5" }}
+              />
+            );
+          })}
 
           {Object.entries(groupedPredictions).map(([id, pts], idx) => {
             if (pts.length < 2) return null;
