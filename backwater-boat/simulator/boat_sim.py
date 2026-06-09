@@ -175,35 +175,21 @@ def make_boats(scenario):
         f"scenarios.{scenario.lower()}"
     )
 
-    return [
-        BoatState(**x)
-        for x in module.make_states()
-    ]
+    return (
+        [BoatState(**x) for x in module.make_states()],
+        module,  # return cached module so callers never re-import
+    )
 
 
 def update_scenario(
     boats,
-    scenario,
+    module,  # pre-imported; no importlib call on the hot path
     tick,
 ):
 
-    module = importlib.import_module(
-        f"scenarios.{scenario.lower()}"
-    )
+    active = [b for b in boats if not b.active_action]
 
-    active = []
-
-    for boat in boats:
-
-        if boat.active_action:
-            continue
-
-        active.append(boat)
-
-    module.update(
-        active,
-        tick,
-    )
+    module.update(active, tick)
 
 
 def connect_client():
@@ -261,9 +247,7 @@ def main():
 
     scenario = args.scenario.lower()
 
-    boats = make_boats(
-        scenario
-    )
+    boats, scenario_module = make_boats(scenario)
 
     boats_by_id = {
         b.boat_id: b
@@ -370,6 +354,8 @@ def main():
         flush=True,
     )
 
+    next_tick = time.monotonic()
+
     while True:
 
         for boat in boats:
@@ -380,7 +366,7 @@ def main():
 
         update_scenario(
             boats,
-            scenario,
+            scenario_module,
             tick,
         )
 
@@ -415,25 +401,21 @@ def main():
                 .upper()
             )
 
+            payload_json = json.dumps(payload)
+
             client.publish(
                 f"boats/{boat.boat_id}/sensor",
-                json.dumps(
-                    payload
-                ),
+                payload_json,
             )
 
-            print(
-                json.dumps(
-                    payload
-                ),
-                flush=True,
-            )
+            print(payload_json, flush=True)
 
         tick += 1
 
-        time.sleep(
-            args.interval
-        )
+        next_tick += args.interval
+        delay = next_tick - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
 
 
 if __name__ == "__main__":

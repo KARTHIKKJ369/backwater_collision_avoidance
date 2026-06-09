@@ -87,6 +87,8 @@ def main() -> None:
 
         print(f"[SIM] Starting scenario: {scenario}", flush=True)
 
+        next_tick = time.monotonic()
+
         for tick in range(SCENARIO_TICKS):
             _update(states, scenario, tick)
 
@@ -105,7 +107,10 @@ def main() -> None:
                 client.publish(f"boats/{b['boat_id']}/sensor", json.dumps(payload))
                 print(json.dumps(payload), flush=True)
 
-            time.sleep(TICK_INTERVAL)
+            next_tick += TICK_INTERVAL
+            delay = next_tick - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
 
         print(f"[SIM] Scenario {scenario} done, switching...", flush=True)
         scenario_idx += 1
